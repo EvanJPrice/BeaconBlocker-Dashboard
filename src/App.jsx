@@ -16,7 +16,11 @@ import PresetsModal from './PresetsModal';
 // --- Helper function to generate API key ---
 function generateApiKey() {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    return Array.from({ length: 32 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    const randomValues = new Uint32Array(32);
+    crypto.getRandomValues(randomValues);
+    return Array.from(randomValues)
+        .map(val => chars[val % chars.length])
+        .join('');
 }
 
 // --- Helper: Get base domain ---
@@ -816,8 +820,9 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
 
             if (!token) throw new Error("No active session");
 
-            console.log("DEBUG: Sending request to http://localhost:3000/delete-account");
-            const response = await fetch('http://localhost:3000/delete-account', {
+            const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+            console.log(`DEBUG: Sending request to ${apiBaseUrl}/delete-account`);
+            const response = await fetch(`${apiBaseUrl}/delete-account`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -1812,7 +1817,8 @@ function AuthForm({ supabase }) {
                 console.log("DEBUG: Login Error:", error.message);
                 // Check if user exists to give better error
                 try {
-                    const checkRes = await fetch('http://localhost:3000/check-email', {
+                    const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+                    const checkRes = await fetch(`${apiBaseUrl}/check-email`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ email })
