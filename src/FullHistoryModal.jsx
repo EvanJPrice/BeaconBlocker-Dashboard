@@ -164,7 +164,8 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                 return;
             }
 
-            const response = await fetch('http://localhost:3000/clear-history', {
+            const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+            const response = await fetch(`${apiBaseUrl}/clear-history`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -294,7 +295,6 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                                 <div key={groupName} style={{ marginBottom: '1.5rem' }}>
                                     <h3 style={{
                                         fontSize: '0.95rem',
-                                        fontWeight: '600',
                                         fontWeight: '600',
                                         color: 'var(--text-secondary)',
                                         margin: '0 0 0.5rem 0',
