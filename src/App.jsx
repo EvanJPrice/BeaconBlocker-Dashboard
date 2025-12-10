@@ -183,10 +183,15 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
 
 
     const PLACEHOLDER_EXAMPLES = [
-        "I need to study for biology. Block everything except Wikipedia.",
-        "I'm working on a coding project. Block social media but allow Stack Overflow.",
-        "I want to focus on writing. Block all websites except Google Docs.",
-        "I need to read a book. Block all internet access for 1 hour."
+        "I need to study for biology. Block everything except Wikipedia and Khan Academy.",
+        "I'm debugging a React app. Block social media but allow Stack Overflow and GitHub.",
+        "I want to write a blog post. Block all websites except Google Docs and Thesaurus.com.",
+        "I need to read a book. Block the entire internet for 45 minutes.",
+        "I'm planning a trip. Allow Airbnb and flights, but block work email and Slack.",
+        "Focus mode: Block Reddit, Twitter, and Facebook. Allow everything else.",
+        "I am learning to cook. Allow YouTube and recipe sites, but block news and politics.",
+        "Late night work. Block Netflix, Hulu, and Twitch. Allow my company portal.",
+        "I need to finish my thesis. Block everything except .edu sites and Google Scholar."
     ];
 
     useEffect(() => {
@@ -221,15 +226,40 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
         return () => clearTimeout(timer);
     }, [charIndex, isDeleting, isPaused, exampleIndex]);
 
+    // --- Helper: Instant Typewriter Reset ---
+    const resetTypewriter = () => {
+        setPlaceholderText(''); // Wipe text immediately
+
+        // Pick a random index that isn't the current one
+        setExampleIndex((prev) => {
+            let next;
+            do {
+                next = Math.floor(Math.random() * PLACEHOLDER_EXAMPLES.length);
+            } while (next === prev && PLACEHOLDER_EXAMPLES.length > 1);
+            return next;
+        });
+
+        setCharIndex(0);        // Reset char index
+        setIsDeleting(false);   // Reset state
+        setIsPaused(false);     // Reset pause
+    };
+
     // --- Auto-Resize Handler for Main Prompt ---
     const handleTextAreaChange = (event) => {
         const textarea = event.target;
-        setSaveStatus('saving'); // Immediate "Listening" feedback
-        setMainPrompt(event.target.value);
+        const newValue = event.target.value;
+
+        setSaveStatus('saving');
+        setMainPrompt(newValue);
+
         textarea.style.height = 'auto';
         textarea.style.height = `${textarea.scrollHeight}px`;
-    };
 
+        // FIX: Reset typewriter instantly if cleared manually
+        if (newValue === '') {
+            resetTypewriter();
+        }
+    };
     // --- Styles ---
     const dashboardCardStyles = { /* ... */ };
     const apiKeyBoxStyles = { /* ... */ };
@@ -324,22 +354,21 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
     const saveToSupabase = async (data, activePresetId = undefined) => {
         if (!session?.user) return;
         setSaveStatus('saving');
-        const startTime = Date.now(); // Start timer
+        const startTime = Date.now();
 
-        // Use provided activePresetId if defined, otherwise fallback to current state
-        // Note: activePresetId can be null (explicit unload), so check for undefined
         const presetIdToSave = activePresetId !== undefined ? activePresetId : (activePreset ? activePreset.id : null);
 
-        // Removed updated_at to fix 400 error (column missing in DB)
         const { error } = await supabase.from('rules').upsert({
             user_id: session.user.id,
             prompt: data.prompt,
             blocked_categories: data.blocked_categories,
             allow_list: data.allow_list,
             block_list: data.block_list,
-            active_preset_id: presetIdToSave
-            // updated_at: new Date() 
+            active_preset_id: presetIdToSave,
+            last_updated: new Date().toISOString() // <--- ADD THIS LINE
         }, { onConflict: 'user_id' });
+
+        // ... rest of the function remains the same
 
         // Calculate elapsed time and wait if needed (min 800ms for UX)
         const elapsed = Date.now() - startTime;
@@ -360,6 +389,9 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
                 block_list: data.block_list
             });
             setHasUnsavedChanges(false);
+
+            // CRITICAL: Tell the extension to clear its cache so new rules take effect
+            window.dispatchEvent(new CustomEvent('BEACON_RULES_UPDATED'));
         }
     };
 
@@ -611,66 +643,79 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
     };
 
     const handleLoadPreset = async (preset) => {
+        // Only warn if there is UN-SAVED work that would be lost
         if (hasUnsavedChanges) {
             if (!confirm("You have unsaved changes. Loading a preset will discard them. Continue?")) {
                 return;
             }
         }
 
-        if (confirm(`Load preset "${preset.name}"? This will overwrite your current settings.`)) {
-            // 1. Update State
-            setMainPrompt(preset.prompt || '');
-            setBlockedCategories(preset.blocked_categories || {});
-            setAllowListArray(preset.allow_list || []);
-            setBlockListArray(preset.block_list || []);
+        // Proceed immediately without the second "Are you sure?" popup
+        setMainPrompt(preset.prompt || '');
+        setBlockedCategories(preset.blocked_categories || {});
+        setAllowListArray(preset.allow_list || []);
+        setBlockListArray(preset.block_list || []);
 
-            // 2. Set Active Preset (Immediate UI Update)
-            console.log('Setting active preset:', { id: preset.id, name: preset.name });
-            setActivePreset({ id: preset.id, name: preset.name });
+        console.log('Setting active preset:', { id: preset.id, name: preset.name });
+        setActivePreset({ id: preset.id, name: preset.name });
 
-            // 3. Sync presetOriginalState
-            setPresetOriginalState({
-                prompt: preset.prompt || '',
-                blocked_categories: preset.blocked_categories || {},
-                allow_list: preset.allow_list || [],
-                block_list: preset.block_list || []
-            });
+        setPresetOriginalState({
+            prompt: preset.prompt || '',
+            blocked_categories: preset.blocked_categories || {},
+            allow_list: preset.allow_list || [],
+            block_list: preset.block_list || []
+        });
 
-            // 4. Persist to Supabase (Await this!)
-            await saveToSupabase({
-                prompt: preset.prompt,
-                blocked_categories: preset.blocked_categories,
-                allow_list: preset.allow_list,
-                block_list: preset.block_list
-            }, preset.id);
+        // Save the new state to the DB immediately
+        await saveToSupabase({
+            prompt: preset.prompt,
+            blocked_categories: preset.blocked_categories,
+            allow_list: preset.allow_list,
+            block_list: preset.block_list
+        }, preset.id);
 
-            // 5. Update Checkpoint
-            setLastCheckpoint({
-                prompt: preset.prompt || '',
-                blocked_categories: preset.blocked_categories || {},
-                allow_list: preset.allow_list || [],
-                block_list: preset.block_list || []
-            });
-            setHasUnsavedChanges(false);
+        setLastCheckpoint({
+            prompt: preset.prompt || '',
+            blocked_categories: preset.blocked_categories || {},
+            allow_list: preset.allow_list || [],
+            block_list: preset.block_list || []
+        });
+        setHasUnsavedChanges(false);
 
-            setMessage(`Preset "${preset.name}" loaded!`);
-
-            setMessage(`Preset "${preset.name}" loaded!`);
-        }
+        setMessage(`Preset "${preset.name}" loaded!`);
     };
 
     const handleUnloadPreset = async () => {
         setIsUnloadModalOpen(false);
+
+        // 1. Reset Dashboard UI to Default State
+        const initialCategories = {};
+        BLOCKED_CATEGORIES.forEach(cat => initialCategories[cat.id] = false);
+
+        setMainPrompt('');
+        setBlockedCategories(initialCategories);
+        setAllowListArray([]);
+        setBlockListArray([]);
+
+        // 2. Clear Active Preset Data
         setActivePreset(null);
         setPresetOriginalState(null);
 
-        // Persist the unload (active_preset_id = null)
+        // 3. Persist the "Empty State" to Supabase
+        // We pass 'null' as the activePresetId to break the link
         await saveToSupabase({
-            prompt: mainPrompt,
-            blocked_categories: blockedCategories,
-            allow_list: allowListArray,
-            block_list: blockListArray
+            prompt: '',
+            blocked_categories: initialCategories,
+            allow_list: [],
+            block_list: []
         }, null);
+
+        // 4. FORCE CACHE RESET
+        // This dispatches the event that content-script.js listens for, 
+        // causing it to tell background.js to wipe the chrome.storage cache.
+        window.dispatchEvent(new CustomEvent('BEACON_RULES_UPDATED'));
+
+        setMessage('Dashboard cleared and cache reset.');
     };
 
     const handleRenamePreset = async (id, newName) => {
@@ -992,60 +1037,71 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
         <div className="dashboard-container">
             {/* OnboardingTour removed from here to prevent duplication */}
 
+            {/* Email Confirmation Banner */}
+            {session?.user && !session.user.email_confirmed_at && (
+                <div style={{
+                    background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
+                    border: '1px solid #f59e0b',
+                    borderRadius: '12px',
+                    padding: '16px 20px',
+                    marginBottom: '1.5rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    boxShadow: '0 2px 8px rgba(245, 158, 11, 0.2)'
+                }}>
+                    <span style={{ fontSize: '24px' }}>📧</span>
+                    <div>
+                        <p style={{ margin: 0, fontWeight: '600', color: '#92400e' }}>
+                            Please confirm your email
+                        </p>
+                        <p style={{ margin: '4px 0 0', fontSize: '0.9rem', color: '#a16207' }}>
+                            Check your inbox for a confirmation link to activate all features.
+                        </p>
+                    </div>
+                </div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', marginTop: '1rem' }}>
                 <div id="tour-welcome-header" style={{ display: 'flex', alignItems: 'center', gap: '20px', position: 'relative' }}>
-                    {/* Logo Wrapper with Beacon Light */}
-                    <div style={{ position: 'relative', width: '80px', height: '80px' }}>
-                        <img src="/logo.jpg" alt="Logo" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                    {/* Logo Wrapper with Beacon Light and Save Glow */}
+                    <div
+                        className={`logo-wrapper ${saveStatus === 'saving' ? 'saving' : saveStatus === 'saved' ? 'saved' : ''}`}
+                        style={{
+                            position: 'relative',
+                            width: '100px',
+                            height: '100px',
+                            borderRadius: '50%',
+                            transition: 'box-shadow 0.3s ease'
+                        }}
+                    >
+                        <img src="/logo.png" alt="Logo" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
 
-                        {/* Beacon Light (Status Dot) */}
-                        <div
-                            className="beacon-light-container"
-                            style={{
-                                position: 'absolute',
-                                top: '2px',
-                                right: '2px',
-                                width: '18px',
-                                height: '18px',
-                                zIndex: 10
-                            }}
-                        >
-                            <div
-                                className={`beacon-dot ${saveStatus === 'saving' ? 'saving' :
-                                    saveStatus === 'saved' ? 'saved' :
-                                        extensionStatus === 'active' ? 'active' :
-                                            extensionStatus === 'logged_out' ? 'logged-out' : 'inactive'
-                                    }`}
-                            />
-
-                            {/* Custom Tooltip */}
-                            <div className="beacon-tooltip">
-                                <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
-                                    {saveStatus === 'saving' ? 'Saving Changes...' :
-                                        saveStatus === 'saved' ? 'Changes Saved' :
-                                            extensionStatus === 'active' ? 'Extension Active' :
-                                                extensionStatus === 'logged_out' ? 'Extension Disconnected' :
-                                                    'Extension Not Detected'}
-                                </div>
-                                <div style={{ fontSize: '0.8rem', opacity: 0.9 }}>
-                                    {saveStatus === 'saving' ? 'Syncing your rules...' :
-                                        saveStatus === 'saved' ? 'Your beacon is up to date.' :
-                                            extensionStatus === 'active' ? 'Your beacon is on and guiding the way.' :
-                                                extensionStatus === 'logged_out' ? 'Please log in to the extension to sync rules.' :
-                                                    'Please install or reload the extension.'}
-                                </div>
+                        {/* Status Tooltip on Logo Hover */}
+                        <div className="beacon-tooltip">
+                            <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
+                                {saveStatus === 'saving' ? 'Saving Changes...' :
+                                    saveStatus === 'saved' ? 'Changes Saved' :
+                                        extensionStatus === 'active' ? 'Extension Active' :
+                                            extensionStatus === 'logged_out' ? 'Extension Disconnected' :
+                                                'Extension Not Detected'}
+                            </div>
+                            <div style={{ fontSize: '0.8rem', opacity: 0.9 }}>
+                                {saveStatus === 'saving' ? 'Syncing your rules...' :
+                                    saveStatus === 'saved' ? 'Your beacon is up to date.' :
+                                        extensionStatus === 'active' ? 'Your beacon is on and guiding the way.' :
+                                            extensionStatus === 'logged_out' ? 'Please log in to the extension to sync rules.' :
+                                                'Please install or reload the extension.'}
                             </div>
                         </div>
 
                         <style>{`
-                            .beacon-light-container {
+                            .logo-wrapper {
                                 position: relative; /* Needed for tooltip positioning */
-                                display: inline-block; /* Or block, depending on desired layout */
                             }
-                            .beacon-light-container:hover .beacon-tooltip {
+                            .logo-wrapper:hover .beacon-tooltip {
                                 opacity: 1;
                                 visibility: visible;
-                                transform: translateX(-50%) translateY(0); /* Adjust translateY to remove initial offset */
+                                transform: translateX(-50%) translateY(0);
                             }
                             .beacon-tooltip {
                                 position: absolute;
@@ -1065,17 +1121,6 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
                                 z-index: 20;
                                 margin-top: 10px; /* Space between beacon and tooltip */
                                 box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-                            }
-                            /* Arrow */
-                            .beacon-tooltip::after {
-                                content: '';
-                                position: absolute;
-                                bottom: 100%; /* Position above the tooltip content */
-                                left: 50%;
-                                margin-left: -5px; /* Center the arrow */
-                                border-width: 5px;
-                                border-style: solid;
-                                border-color: transparent transparent #1e293b transparent;
                             }
                         `}</style>
                     </div>
@@ -1177,12 +1222,13 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
                         <div style={{ width: '1px', height: '20px', background: 'var(--border-color)' }}></div>
 
                         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                            {/* Save Status Indicator Removed (Moved to Top) */}
 
-                            {activePreset && (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            {/* --- ACTIVE PRESET SECTION --- */}
+                            {activePreset ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                     {isRenamingPreset ? (
-                                        <div className="inline-save-container" style={{ height: '36px', display: 'flex', alignItems: 'center' }}>
+                                        // --- RENAME MODE ---
+                                        <div className="inline-save-container">
                                             <input
                                                 type="text"
                                                 className="inline-save-input"
@@ -1190,128 +1236,62 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
                                                 onChange={(e) => setRenamePresetInput(e.target.value)}
                                                 onFocus={(e) => e.target.select()}
                                                 autoFocus
-                                                style={{
-                                                    background: 'transparent',
-                                                    border: 'none',
-                                                    borderBottom: '1px solid var(--text-muted)',
-                                                    borderRadius: 0,
-                                                    padding: '2px 4px',
-                                                    color: 'var(--text-primary)',
-                                                    fontSize: '1rem',
-                                                    width: '120px',
-                                                    outline: 'none'
-                                                }}
                                                 onKeyDown={(e) => {
                                                     if (e.key === 'Enter') handleConfirmRename();
                                                     if (e.key === 'Escape') handleCancelRename();
                                                 }}
                                             />
-                                            <div className="inline-save-actions" style={{ display: 'flex', gap: '4px' }}>
-                                                <button
-                                                    className="inline-action-btn confirm"
-                                                    onClick={handleConfirmRename}
-                                                    title="Save Name"
-                                                >
-                                                    ✓
-                                                </button>
-                                                <button
-                                                    className="inline-action-btn cancel"
-                                                    onClick={handleCancelRename}
-                                                    title="Cancel"
-                                                >
-                                                    ✕
-                                                </button>
-                                            </div>
+                                            <button className="inline-action-btn confirm" onClick={handleConfirmRename} title="Save Name">✓</button>
+                                            <button className="inline-action-btn cancel" onClick={handleCancelRename} title="Cancel">✕</button>
                                         </div>
                                     ) : (
-                                        <button
-                                            className={`preset-button ${isPresetModified ? 'primary' : 'neutral'}`}
-                                            onClick={isPresetModified ? handleUpdateActivePreset : handleStartRename}
-                                            title={isPresetModified ? "Save changes to this preset" : "Click to rename preset"}
-                                            style={{
-                                                opacity: 1,
-                                                cursor: 'pointer',
-                                                minWidth: '100px'
-                                            }}
-                                        >
-                                            {isPresetModified ? `Save "${activePreset.name}"` : activePreset.name}
-                                        </button>
-                                    )}
-
-                                    {!isRenamingPreset && (
-                                        <button
-                                            className="inline-save-btn neutral"
-                                            onClick={() => setIsUnloadModalOpen(true)}
-                                            title="Unload Preset"
-                                            style={{ width: '24px', height: '24px', fontSize: '0.8rem', opacity: 0.6 }}
-                                        >
-                                            ✕
-                                        </button>
-                                    )}
-                                </div>
-                            )}
-
-                            {isSavingPreset ? (
-                                <div
-                                    className="preset-button"
-                                    style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '8px',
-                                        padding: '0.5rem 1rem', // Match button padding
-                                        cursor: 'default',
-                                        border: '1px solid var(--primary-blue)', // Highlight active state
-                                        backgroundColor: 'var(--card-bg)'
-                                    }}
-                                >
-                                    <span style={{ fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
-                                        Save as
-                                    </span>
-                                    <div className="inline-save-container" style={{ display: 'flex', alignItems: 'center', gap: '5px', flex: 1 }}>
-                                        <input
-                                            type="text"
-                                            className="inline-save-input"
-                                            value={newPresetName}
-                                            onChange={(e) => {
-                                                setNewPresetName(e.target.value);
-                                                setSaveWarning(null);
-                                                setOverwriteCandidate(null);
-                                            }}
-                                            onFocus={(e) => e.target.select()}
-                                            autoFocus
-                                            placeholder="Name"
-                                            style={{
-                                                background: 'transparent',
-                                                border: 'none', // Seamless interaction
-                                                borderRadius: 0,
-                                                padding: '2px 4px',
-                                                color: 'var(--text-primary)',
-                                                fontSize: '1rem', // Match button text
-                                                width: '120px',
-                                                outline: 'none'
-                                            }}
-                                            onKeyDown={(e) => {
-                                                if (e.key === 'Enter') handleConfirmSavePreset();
-                                                if (e.key === 'Escape') handleCancelSavePreset();
-                                            }}
-                                        />
-                                        <div className="inline-save-actions" style={{ display: 'flex', gap: '4px' }}>
+                                        // --- ACTIVE PRESET DISPLAY ---
+                                        <>
                                             <button
-                                                className="inline-action-btn confirm"
-                                                onClick={handleConfirmSavePreset}
-                                                title="Save"
+                                                className={`preset-button ${isPresetModified ? 'primary' : 'neutral'}`}
+                                                onClick={isPresetModified ? handleUpdateActivePreset : handleStartRename}
+                                                title={isPresetModified ? "Save changes to this preset" : "Click to rename preset"}
+                                                style={{ minWidth: '100px' }}
                                             >
-                                                ✓
+                                                {isPresetModified ? `Save "${activePreset.name}"` : activePreset.name}
                                             </button>
+
+                                            {/* UNLOAD BUTTON - Matches Cancel Style */}
                                             <button
                                                 className="inline-action-btn cancel"
-                                                onClick={handleCancelSavePreset}
-                                                title="Cancel"
+                                                onClick={() => setIsUnloadModalOpen(true)}
+                                                title="Unload Preset"
+                                                style={{ fontSize: '1rem', width: '28px', height: '28px' }}
                                             >
                                                 ✕
                                             </button>
-                                        </div>
-                                    </div>
+                                        </>
+                                    )}
+                                </div>
+                            ) : null}
+
+                            {/* --- SAVE AS BUTTON --- */}
+                            {isSavingPreset ? (
+                                <div className="inline-save-container">
+                                    <input
+                                        type="text"
+                                        className="inline-save-input"
+                                        value={newPresetName}
+                                        onChange={(e) => {
+                                            setNewPresetName(e.target.value);
+                                            setSaveWarning(null);
+                                            setOverwriteCandidate(null);
+                                        }}
+                                        onFocus={(e) => e.target.select()}
+                                        autoFocus
+                                        placeholder="Preset Name"
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') handleConfirmSavePreset();
+                                            if (e.key === 'Escape') handleCancelSavePreset();
+                                        }}
+                                    />
+                                    <button className="inline-action-btn confirm" onClick={handleConfirmSavePreset} title="Save">✓</button>
+                                    <button className="inline-action-btn cancel" onClick={handleCancelSavePreset} title="Cancel">✕</button>
                                 </div>
                             ) : (
                                 <button
@@ -1322,6 +1302,8 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
                                     Save As
                                 </button>
                             )}
+
+                            {/* --- LOAD BUTTON --- */}
                             <button
                                 id="tour-load-preset-btn"
                                 className="preset-button"
@@ -1843,7 +1825,9 @@ function AuthForm({ supabase }) {
             if (error) {
                 setMessage(error.message);
             } else {
-                setMessage("Account created! You are now logged in.");
+                // Clear the onboarding flag so the tutorial shows for new users
+                localStorage.removeItem('hasSeenOnboarding');
+                setMessage("Account created! Please check your email to confirm your account. A tutorial will guide you through the app.");
             }
         }
         setLoading(false);
@@ -1884,7 +1868,7 @@ function AuthForm({ supabase }) {
         <div className="auth-container">
             <div className={`auth-card ${isLogin ? 'mode-login' : 'mode-signup'}`}>
                 <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-                    <img src="/logo.jpg" alt="Beacon Blocker Logo" style={{ width: '80px', height: '80px', marginBottom: '1rem', borderRadius: '50%' }} />
+                    <img src="/logo.png" alt="Beacon Blocker Logo" style={{ width: '80px', height: '80px', marginBottom: '1rem', borderRadius: '50%' }} />
                     <h1 style={{ margin: 0, color: isLogin ? 'var(--primary-blue)' : 'var(--primary-red)' }}>
                         Beacon Blocker
                     </h1>
@@ -2215,7 +2199,35 @@ export default function App() {
     }, []);
 
     if (loading) {
-        return (<div style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>Loading...</div>);
+        return (
+            <div style={{
+                height: '100vh',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center',
+                alignItems: 'center',
+                background: 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)'
+            }}>
+                <img
+                    src="/logo.png"
+                    alt="Beacon Blocker"
+                    style={{
+                        width: '100px',
+                        height: '100px',
+                        borderRadius: '50%',
+                        marginBottom: '1rem',
+                        animation: 'pulse 2s ease-in-out infinite'
+                    }}
+                />
+                <p style={{ color: '#64748b', fontSize: '1rem' }}>Loading...</p>
+                <style>{`
+                    @keyframes pulse {
+                        0%, 100% { transform: scale(1); opacity: 1; }
+                        50% { transform: scale(1.05); opacity: 0.8; }
+                    }
+                `}</style>
+            </div>
+        );
     }
 
     if (recoveryMode) {

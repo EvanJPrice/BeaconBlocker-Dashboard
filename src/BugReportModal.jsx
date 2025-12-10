@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
 
 export default function BugReportModal({ isOpen, onClose, userId, userEmail }) {
@@ -9,6 +9,12 @@ export default function BugReportModal({ isOpen, onClose, userId, userEmail }) {
     const [loading, setLoading] = useState(false);
     const [success, setSuccess] = useState(false);
 
+    // Screenshot state
+    const [screenshot, setScreenshot] = useState(null);
+    const [screenshotPreview, setScreenshotPreview] = useState(null);
+    const [isDragging, setIsDragging] = useState(false);
+    const fileInputRef = useRef(null);
+
     // Initialize manualEmail when modal opens
     useEffect(() => {
         if (isOpen && userEmail) {
@@ -16,19 +22,101 @@ export default function BugReportModal({ isOpen, onClose, userId, userEmail }) {
         }
     }, [isOpen, userEmail]);
 
+    // Clean up preview URL when component unmounts or screenshot changes
+    useEffect(() => {
+        return () => {
+            if (screenshotPreview) {
+                URL.revokeObjectURL(screenshotPreview);
+            }
+        };
+    }, [screenshotPreview]);
+
     if (!isOpen) return null;
+
+    const handleFileSelect = (file) => {
+        if (file && file.type.startsWith('image/')) {
+            // Check file size (max 5MB)
+            if (file.size > 5 * 1024 * 1024) {
+                alert('Image must be under 5MB');
+                return;
+            }
+            setScreenshot(file);
+            setScreenshotPreview(URL.createObjectURL(file));
+        }
+    };
+
+    const handleDragOver = (e) => {
+        e.preventDefault();
+        setIsDragging(true);
+    };
+
+    const handleDragLeave = (e) => {
+        e.preventDefault();
+        setIsDragging(false);
+    };
+
+    const handleDrop = (e) => {
+        e.preventDefault();
+        setIsDragging(false);
+        const file = e.dataTransfer.files[0];
+        handleFileSelect(file);
+    };
+
+    const handleFileInputChange = (e) => {
+        const file = e.target.files[0];
+        handleFileSelect(file);
+    };
+
+    const removeScreenshot = () => {
+        setScreenshot(null);
+        if (screenshotPreview) {
+            URL.revokeObjectURL(screenshotPreview);
+        }
+        setScreenshotPreview(null);
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+        }
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
 
         try {
+            let screenshotUrl = null;
+
+            // Upload screenshot to Supabase Storage if provided
+            if (screenshot) {
+                const fileExt = screenshot.name.split('.').pop();
+                const fileName = `bug-report-${Date.now()}.${fileExt}`;
+                const filePath = `bug-reports/${fileName}`;
+
+                const { data: uploadData, error: uploadError } = await supabase.storage
+                    .from('Beacon Blocker - Marketing')
+                    .upload(filePath, screenshot, {
+                        cacheControl: '3600',
+                        upsert: false
+                    });
+
+                if (uploadError) {
+                    console.error('Screenshot upload error:', uploadError);
+                    // Continue without screenshot
+                } else {
+                    // Get public URL
+                    const { data: { publicUrl } } = supabase.storage
+                        .from('Beacon Blocker - Marketing')
+                        .getPublicUrl(filePath);
+                    screenshotUrl = publicUrl;
+                }
+            }
+
             const reportData = {
                 description,
                 steps,
-                anonymous: false, // Always false now
+                anonymous: false,
                 user_id: userId,
-                user_email: manualEmail, // Use manualEmail directly (empty string means anonymous)
+                user_email: manualEmail,
+                screenshot_url: screenshotUrl,
                 timestamp: new Date().toISOString(),
                 recipient: 'ej3price@gmail.com'
             };
@@ -57,6 +145,8 @@ export default function BugReportModal({ isOpen, onClose, userId, userEmail }) {
                 setSuccess(false);
                 setDescription('');
                 setSteps('');
+                setScreenshot(null);
+                setScreenshotPreview(null);
                 onClose();
             }, 2000);
 
@@ -107,13 +197,82 @@ export default function BugReportModal({ isOpen, onClose, userId, userEmail }) {
                             />
                         </div>
 
-                        <div style={{ marginBottom: '1.5rem' }}>
+                        <div style={{ marginBottom: '1rem' }}>
                             <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }}>Steps to reproduce (Optional)</label>
                             <textarea
                                 value={steps}
                                 onChange={e => setSteps(e.target.value)}
                                 placeholder="1. Go to..."
                                 style={{ width: '100%', minHeight: '80px', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', fontFamily: 'inherit', resize: 'vertical', background: 'var(--input-bg)', color: 'var(--text-primary)' }}
+                            />
+                        </div>
+
+                        {/* Screenshot Upload */}
+                        <div style={{ marginBottom: '1.5rem' }}>
+                            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }}>Screenshot (Optional)</label>
+
+                            {screenshotPreview ? (
+                                <div style={{ position: 'relative', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+                                    <img
+                                        src={screenshotPreview}
+                                        alt="Screenshot preview"
+                                        style={{ width: '100%', maxHeight: '200px', objectFit: 'contain', background: '#f8fafc' }}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={removeScreenshot}
+                                        style={{
+                                            position: 'absolute',
+                                            top: '8px',
+                                            right: '8px',
+                                            background: '#ef4444',
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: '50%',
+                                            width: '28px',
+                                            height: '28px',
+                                            cursor: 'pointer',
+                                            fontSize: '16px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center'
+                                        }}
+                                    >
+                                        ×
+                                    </button>
+                                </div>
+                            ) : (
+                                <div
+                                    onDragOver={handleDragOver}
+                                    onDragLeave={handleDragLeave}
+                                    onDrop={handleDrop}
+                                    onClick={() => fileInputRef.current?.click()}
+                                    style={{
+                                        border: `2px dashed ${isDragging ? '#234b7a' : 'var(--border-color)'}`,
+                                        borderRadius: '8px',
+                                        padding: '24px',
+                                        textAlign: 'center',
+                                        cursor: 'pointer',
+                                        background: isDragging ? '#f0f7ff' : 'var(--input-bg)',
+                                        transition: 'all 0.2s ease'
+                                    }}
+                                >
+                                    <div style={{ fontSize: '24px', marginBottom: '8px' }}>📷</div>
+                                    <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                                        Drag & drop an image or <span style={{ color: '#234b7a', textDecoration: 'underline' }}>browse</span>
+                                    </p>
+                                    <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                                        PNG, JPG up to 5MB
+                                    </p>
+                                </div>
+                            )}
+
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept="image/*"
+                                onChange={handleFileInputChange}
+                                style={{ display: 'none' }}
                             />
                         </div>
 
@@ -140,7 +299,7 @@ export default function BugReportModal({ isOpen, onClose, userId, userEmail }) {
                                     padding: '10px 20px',
                                     borderRadius: '6px',
                                     border: 'none',
-                                    background: '#2563eb',
+                                    background: '#234b7a',
                                     color: 'white',
                                     cursor: loading ? 'not-allowed' : 'pointer',
                                     fontWeight: '600',

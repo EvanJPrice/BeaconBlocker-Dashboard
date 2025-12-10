@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
 
 const LOGS_PER_PAGE = 50; // Number of logs to fetch at a time
+const BACKEND_URL = 'http://localhost:3000'; // Ensure this matches your running server
 
 // This component fetches and manages its own data
 export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUrl, initialSearchTerm = '', onHistoryCleared, onReportBug }) {
@@ -78,9 +79,6 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
     useEffect(() => {
         const timer = setTimeout(() => {
             setCurrentPage(0); // Reset page on search
-            // The actual fetch is triggered by the searchTerm dependency in the other effects
-            // We just need to ensure we don't trigger it too fast.
-            // Actually, to properly debounce, we should have a debouncedSearchTerm state.
         }, 500);
         return () => clearTimeout(timer);
     }, [searchTerm]);
@@ -102,7 +100,6 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                     .eq('user_id', userId);
 
                 if (debouncedSearchTerm) {
-                    // Search across url, domain, and page_title
                     query = query.or(`url.ilike.%${debouncedSearchTerm}%,domain.ilike.%${debouncedSearchTerm}%,page_title.ilike.%${debouncedSearchTerm}%`);
                 }
 
@@ -134,7 +131,6 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                     .range(from, to);
 
                 if (debouncedSearchTerm) {
-                    // Search across url, domain, and page_title
                     query = query.or(`url.ilike.%${debouncedSearchTerm}%,domain.ilike.%${debouncedSearchTerm}%,page_title.ilike.%${debouncedSearchTerm}%`);
                 }
 
@@ -164,7 +160,9 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                 return;
             }
 
-            const response = await fetch('http://localhost:3000/clear-history', {
+            console.log("Attempting to clear history via:", `${BACKEND_URL}/clear-history`);
+
+            const response = await fetch(`${BACKEND_URL}/clear-history`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -174,6 +172,7 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
 
             if (!response.ok) {
                 const errData = await response.json().catch(() => ({}));
+                console.error("Clear history failed:", errData);
                 throw new Error(errData.error || "Failed to clear history");
             }
 
@@ -203,7 +202,19 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
 
     return (
         <div className="modal-overlay" onClick={onClose}>
-            <div id="tour-full-history-modal" className="modal-content" ref={modalContentRef} onClick={e => e.stopPropagation()} style={{ position: 'relative', zIndex: 2001 }}>
+            <div 
+                id="tour-full-history-modal" 
+                className="modal-content" 
+                ref={modalContentRef} 
+                onClick={e => e.stopPropagation()} 
+                style={{ 
+                    position: 'relative', 
+                    zIndex: 2001,
+                    // FIX: Widen the modal significantly
+                    width: '90%', 
+                    maxWidth: '1000px' 
+                }}
+            >
                 <div className="modal-header" style={{ display: 'block', paddingBottom: '0' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
                         <h2 style={{ margin: 0 }}>Full History</h2>
@@ -295,7 +306,6 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                                     <h3 style={{
                                         fontSize: '0.95rem',
                                         fontWeight: '600',
-                                        fontWeight: '600',
                                         color: 'var(--text-secondary)',
                                         margin: '0 0 0.5rem 0',
                                         paddingBottom: '0.25rem',
@@ -304,14 +314,12 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                                         {groupName}
                                     </h3>
                                     {groupLogs.map((log, logIndex) => {
-                                        // Logic: Normalize decision to BLOCK or ALLOW
                                         const rawDecision = log.decision ? log.decision.toUpperCase() : 'BLOCK';
                                         const isCache = rawDecision.includes('CACHE') || (log.reason && log.reason.toLowerCase().includes('cache'));
-                                        const normalizedDecision = rawDecision.replace('_CACHE', ''); // BLOCK or ALLOW
-                                        const decisionClass = normalizedDecision.toLowerCase(); // 'allow' or 'block'
+                                        const normalizedDecision = rawDecision.replace('_CACHE', '');
+                                        const decisionClass = normalizedDecision.toLowerCase();
                                         const decisionText = normalizedDecision;
 
-                                        // Reason text logic
                                         let mainReason = log.reason;
                                         let expandedReason = log.reason;
 
@@ -375,7 +383,6 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                                                         <p><strong>Reason:</strong> {expandedReason}</p>
                                                         <p><strong>Time:</strong> {new Date(log.created_at).toLocaleString()}</p>
 
-                                                        {/* Feature: Link to history for this URL or Domain */}
                                                         <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
                                                             <button
                                                                 onClick={(e) => {
@@ -428,7 +435,6 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                         )}
                     </ul>
 
-                    {/* Bottom Pagination (Optional, but good to keep for convenience at bottom) */}
                     <div className="pagination-controls">
                         <button onClick={() => setCurrentPage(p => p - 1)} disabled={!canGoPrev || loading}>
                             &larr; Previous
@@ -441,7 +447,6 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                         </button>
                     </div>
 
-                    {/* Footer Tips */}
                     <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', fontSize: '0.85rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
                         <p style={{ margin: 0 }}>
                             Tip: You can clear your cache or update blocking rules in the Dashboard settings.

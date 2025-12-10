@@ -1,26 +1,27 @@
+/* Imports: IBM Plex Mono (Tech) & Herr Von Muellerhoff (The Handwriting) */
+@import url('https://fonts.googleapis.com/css2?family=Herr+Von+Muellerhoff&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+
 :root {
   scrollbar-gutter: stable;
 
-  /* Shared Colors */
-  --primary-blue: #2563eb;
-  --primary-blue-hover: #1d4ed8;
-  --primary-red: #dc2626;
-  --primary-red-hover: #b91c1c;
+  /* Shared Colors - Updated to match logo */
+  --primary-blue: #234b7a;
+  --primary-blue-hover: #1a365d;
+  --primary-red: #c41e3a;
+  --primary-red-hover: #a31830;
   --success-green: #22c55e;
+  --accent-teal: #26C6DA;
 
-  /* Light Mode (Default) */
-  --bg-color: #f1f5f9;
-  /* Matches Dashboard.css preference */
+  /* Light Mode (Default) - Subtle blue tint */
+  --bg-color: #f0f7ff;
   --card-bg: #ffffff;
   --text-main: #1e293b;
   --text-primary: #1e293b;
-  /* Alias for compatibility */
   --text-muted: #64748b;
   --text-secondary: #64748b;
-  /* Alias */
-  --border-color: #e2e8f0;
+  --border-color: #dde8f5;
   --input-bg: #f8fafc;
-  --hover-bg: #f1f5f9;
+  --hover-bg: #dbeafe;
   --shadow-color: rgba(0, 0, 0, 0.1);
   --modal-overlay: rgba(0, 0, 0, 0.5);
 
@@ -38,9 +39,7 @@
   --text-main: #f8fafc;
   --text-primary: #f8fafc;
   --text-muted: #e2e8f0;
-  /* Brighter Slate 200 */
   --text-secondary: #e2e8f0;
-  /* Brighter Slate 200 */
   --border-color: #334155;
   --input-bg: #020617;
   --hover-bg: #334155;
@@ -54,36 +53,14 @@
 
   /* Log Item Backgrounds (Dark Mode) */
   --log-allow-bg: rgba(34, 197, 94, 0.15);
-  /* Slightly brighter Green Tint */
   --log-block-bg: rgba(239, 68, 68, 0.15);
-  /* Slightly brighter Red Tint */
   --log-allow-border: #22c55e;
   --log-block-border: #ef4444;
 }
 
-/* --- Dark Mode Scrollbar --- */
-[data-theme='dark'] ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-[data-theme='dark'] ::-webkit-scrollbar-track {
-  background: #0f172a;
-}
-
-[data-theme='dark'] ::-webkit-scrollbar-thumb {
-  background: #475569;
-  border-radius: 5px;
-  border: 2px solid #0f172a;
-}
-
-[data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
-  background: #64748b;
-}
-
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-family: 'IBM Plex Mono', monospace;
   background-color: var(--bg-color);
   color: var(--text-main);
   -webkit-font-smoothing: antialiased;
@@ -102,7 +79,6 @@ body {
   align-items: center;
   justify-content: center;
   background: var(--bg-color);
-  /* Use theme variable instead of fixed gradient */
 }
 
 .auth-card {
@@ -115,32 +91,15 @@ body {
   transition: all 0.3s ease;
 }
 
-/* Modes */
-.mode-login .auth-button {
-  background-color: var(--primary-blue);
+/* Auth Buttons & Inputs (Inherit Font) */
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
 }
 
-.mode-login .auth-button:hover {
-  background-color: var(--primary-blue-hover);
-}
-
-.mode-login .auth-link {
-  color: var(--primary-blue);
-}
-
-.mode-signup .auth-button {
-  background-color: var(--primary-red);
-}
-
-.mode-signup .auth-button:hover {
-  background-color: var(--primary-red-hover);
-}
-
-.mode-signup .auth-link {
-  color: var(--primary-red);
-}
-
-/* Form Elements */
+/* Form Styles */
 .form-group {
   margin-bottom: 1.25rem;
 }
@@ -198,83 +157,27 @@ body {
   text-decoration: underline;
 }
 
-/* Dashboard Styles */
-.dashboard-card {
-  background: var(--card-bg);
-  padding: 2rem;
-  border-radius: 12px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  margin-bottom: 2rem;
+/* Modes */
+.mode-login .auth-button {
+  background-color: var(--primary-blue);
 }
 
-.status-indicator {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.5rem 1rem;
-  border-radius: 9999px;
-  font-weight: 500;
-  font-size: 0.875rem;
-  margin-bottom: 1.5rem;
+.mode-login .auth-button:hover {
+  background-color: var(--primary-blue-hover);
 }
 
-.status-active {
-  background-color: #dcfce7;
-  color: #166534;
+.mode-login .auth-link {
+  color: var(--primary-blue);
 }
 
-.status-inactive {
-  background-color: #fee2e2;
-  color: #991b1b;
+.mode-signup .auth-button {
+  background-color: var(--primary-red);
 }
 
-.status-unknown {
-  background-color: #f1f5f9;
-  color: #475569;
+.mode-signup .auth-button:hover {
+  background-color: var(--primary-red-hover);
 }
 
-/* --- Inline Save Actions --- */
-.inline-action-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  border-radius: 4px;
-  padding: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-  font-size: 1.1rem;
-}
-
-.inline-action-btn:hover {
-  background-color: rgba(0, 0, 0, 0.05);
-}
-
-[data-theme='dark'] .inline-action-btn:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-}
-
-.inline-action-btn.confirm {
-  color: var(--success-green);
-}
-
-.inline-action-btn.cancel {
-  color: var(--text-muted);
-}
-
-.inline-action-btn.cancel:hover {
+.mode-signup .auth-link {
   color: var(--primary-red);
-}
-
-/* --- Modal Buttons --- */
-.modal-action-btn {
-  border-radius: 6px !important;
-  font-weight: 500;
-  transition: all 0.2s;
-  padding: 8px 16px !important;
-}
-
-.modal-action-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }

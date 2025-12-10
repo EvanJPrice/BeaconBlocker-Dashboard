@@ -45,24 +45,11 @@ export default function ProfileDropdown({ userEmail, onSignOut, onDeleteAccount,
             <button
                 type="button"
                 onClick={toggleDropdown}
-                className="profile-dropdown-btn"
-                style={{
-                    // Inline styles that are dynamic or specific overrides
-                    // Most styles moved to CSS class
-                }}
+                className={`profile-dropdown-btn ${isOpen ? 'active' : ''}`}
             >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {/* Arrow: Matches Additional Controls style using .toggle-icon class */}
-                    <span
-                        className="toggle-icon"
-                        style={{
-                            color: isOpen ? '#f59e0b' : '#94a3b8', // Gold when open, Grey (#94a3b8 matches CSS) when closed
-                            transform: 'none',
-                            transition: 'color 0.2s, transform 0.2s',
-                            pointerEvents: 'none',
-                            display: 'inline-block',
-                        }}
-                    >
+                    {/* Force font-size/weight to match headers exactly */}
+                    <span className="toggle-icon" style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>
                         {isOpen ? '▼' : '▶'}
                     </span>
                     <span style={{ pointerEvents: 'none' }}>{userEmail || 'Account'}</span>
@@ -76,14 +63,13 @@ export default function ProfileDropdown({ userEmail, onSignOut, onDeleteAccount,
                         position: 'absolute',
                         top: '100%',
                         right: '0',
-                        // left: '0', // Removed to allow expansion
                         marginTop: '4px',
                         background: 'var(--card-bg)',
                         border: '1px solid var(--border-color)',
                         borderRadius: '8px',
                         boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-                        minWidth: '100%', // At least as wide as button
-                        width: 'max-content', // Allow growing for long text
+                        minWidth: '100%',
+                        width: 'max-content',
                         zIndex: 1000,
                         overflow: 'hidden',
                         display: 'flex',
@@ -130,23 +116,19 @@ export default function ProfileDropdown({ userEmail, onSignOut, onDeleteAccount,
                     </div>
 
                     <div style={{ padding: '4px' }}>
-
                         <button
                             type="button"
                             onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
 
-                                // Use ref for synchronous logic check
                                 if (confirmRef.current) {
                                     setIsOpen(false);
-                                    if (onSignOut) onSignOut(true); // Force sign out
+                                    if (onSignOut) onSignOut(true);
                                 } else {
-                                    // Set both ref (for logic) and state (for UI)
                                     confirmRef.current = true;
                                     setConfirmSignOut(true);
 
-                                    // Auto-reset after 3s
                                     if (timerRef.current) clearTimeout(timerRef.current);
                                     timerRef.current = setTimeout(() => {
                                         confirmRef.current = false;

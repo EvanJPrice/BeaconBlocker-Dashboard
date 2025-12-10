@@ -1,6 +1,61 @@
 /* This is your new Dashboard.css file */
 
+/* Logo Save Glow Effect */
+.logo-wrapper {
+  /* Default: subtle green pulse when active */
+  box-shadow: 0 0 10px 3px rgba(34, 197, 94, 0.3);
+  animation: subtleGreenPulse 3s ease-in-out infinite;
+}
 
+.logo-wrapper.saving {
+  /* Saving: orange pulsing glow */
+  box-shadow: 0 0 20px 8px rgba(245, 158, 11, 0.6);
+  animation: savingOrangePulse 1.5s ease-in-out infinite;
+}
+
+.logo-wrapper.saved {
+  /* Saved: bright green flash that fades back to subtle pulse */
+  box-shadow: 0 0 25px 10px rgba(34, 197, 94, 0.8);
+  animation: savedGreenFlash 1.5s ease-out forwards;
+}
+
+@keyframes subtleGreenPulse {
+
+  0%,
+  100% {
+    box-shadow: 0 0 10px 3px rgba(34, 197, 94, 0.3);
+  }
+
+  50% {
+    box-shadow: 0 0 15px 5px rgba(34, 197, 94, 0.5);
+  }
+}
+
+@keyframes savingOrangePulse {
+
+  0%,
+  100% {
+    box-shadow: 0 0 20px 8px rgba(245, 158, 11, 0.6);
+  }
+
+  50% {
+    box-shadow: 0 0 30px 12px rgba(245, 158, 11, 0.9);
+  }
+}
+
+@keyframes savedGreenFlash {
+  0% {
+    box-shadow: 0 0 30px 15px rgba(34, 197, 94, 1);
+  }
+
+  50% {
+    box-shadow: 0 0 20px 8px rgba(34, 197, 94, 0.6);
+  }
+
+  100% {
+    box-shadow: 0 0 10px 3px rgba(34, 197, 94, 0.3);
+  }
+}
 
 #mainPrompt {
   /* Target the specific textarea by its ID */
@@ -129,6 +184,9 @@
   text-align: center;
   /* Center text for cleaner look without icon/toggle */
   min-height: 80px;
+  user-select: none;
+  /* Prevent text selection */
+  -webkit-user-select: none;
 }
 
 .category-card:hover {
@@ -155,16 +213,7 @@
   color: #475569 !important;
 }
 
-/* Add a subtle checkmark indicator for active state */
-.category-card.active::after {
-  content: "✓";
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  color: #f59e0b;
-  font-weight: bold;
-  font-size: 1rem;
-}
+/* Active state is now shown by background/border color only - no checkmark */
 
 .category-header {
   display: flex;
@@ -226,16 +275,20 @@
 
 .helpers-header:hover {
   background-color: var(--hover-bg);
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.4);
+  transform: translateY(-1px);
 }
 
 .helpers-header.active {
   background-color: var(--input-bg);
-  /* Light background when open */
+  border: 1px solid var(--text-secondary);
+  /* Dark outline when open */
 }
 
 .helpers-header.active:hover {
   background-color: var(--hover-bg);
-  /* Match the standard hover color */
+  border: 1px solid var(--text-secondary);
+  /* Keep dark outline on hover when open */
 }
 
 /* --- Tag Input Styles --- */
@@ -642,19 +695,45 @@
   font-size: 1.5rem;
 }
 
-.modal-close-button {
-  font-size: 2.5rem;
-  font-weight: 300;
-  line-height: 1;
-  color: #888;
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0;
+/* --- FINAL FIXES: Dropdowns & Modals --- */
+
+/* 1. Make the Profile Triangle Glow Gold */
+.profile-dropdown-btn.active .toggle-icon {
+  color: #f59e0b !important;
+  /* Force Gold */
+  transform: rotate(0deg) !important;
+  /* Ensure stable rotation */
 }
 
+/* 2. Fix the Modal "X" Button (Color & Hover) */
+.modal-close-button {
+  font-size: 1.25rem !important;
+  font-weight: 700 !important;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  line-height: 1 !important;
+
+  /* Start GREY (matches other icons) */
+  color: #94a3b8 !important;
+  background: transparent !important;
+  border: none !important;
+
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+}
+
+/* 3. Make the "X" Glow Red on Hover */
 .modal-close-button:hover {
-  color: #000;
+  color: #dc2626 !important;
+  /* Red Text */
+  background-color: #fee2e2 !important;
+  /* Light Red Background */
 }
 
 .modal-body {
@@ -857,19 +936,52 @@
 /* --- Emphasized Main Prompt Styles --- */
 .main-prompt-label {
   display: block;
-  margin-bottom: 0.75rem;
-  font-weight: 700;
-  font-size: 1.1rem;
+  margin-bottom: 0.5rem;
+
+  /* The "Captain's Log" Look */
+  font-family: 'Pinyon Script', cursive;
+  /* Ornate, legible, historic */
+  font-size: 1.8rem;
+  /* Needs to be large to be readable */
+  font-weight: 400;
   color: var(--text-primary);
+  /* Use primary text color for better contrast */
+
+  /* Remove the tilt, Pinyon Script has a natural slant */
+  letter-spacing: 1px;
+  margin-left: 4px;
 }
 
+/* --- Emphasized Main Prompt Styles --- */
+.main-prompt-label {
+  display: block;
+  margin-bottom: 0.5rem;
+
+  /* The "Captain's Log" Look */
+  font-family: 'Pinyon Script', cursive;
+  /* Ornate, legible, historic */
+  font-size: 1.3rem;
+  /* Needs to be large to be readable */
+  font-weight: 700;
+  color: var(--text-primary);
+  /* Use primary text color for better contrast */
+
+  /* Remove the tilt, Pinyon Script has a natural slant */
+  letter-spacing: 1px;
+  margin-left: 4px;
+}
+
+/* --- The Input Field (The Modern Interface) --- */
 .main-prompt-textarea {
   width: 100%;
   box-sizing: border-box;
-  font-family: 'Inter', sans-serif;
+
+  /* 1. User Text: Crisp, Digital, Modern (Time Traveler Device) */
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 500;
+
   padding: 20px;
-  border: 1px solid rgba(245, 158, 11, 0.3);
-  /* Gold tint border */
+  border: 1px solid rgba(253, 224, 71, 0.5);
   border-radius: 16px;
   background-color: #ffffff;
   color: #0f172a;
@@ -879,12 +991,26 @@
   resize: none;
   overflow-y: hidden;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-
-  /* The "Beacon" Golden Glow */
   box-shadow:
     0 4px 6px -1px rgba(0, 0, 0, 0.05),
-    0 0 40px -10px rgba(245, 158, 11, 0.25);
-  /* Large, diffuse gold glow */
+    0 0 40px -10px rgba(253, 224, 71, 0.35);
+}
+
+/* --- The Placeholder (The Ancient Artifact) --- */
+.main-prompt-textarea::placeholder {
+  /* 2. AI Text: Old, Mechanical, Analog */
+  /* Added 'Lucida Sans Typewriter' first as requested */
+  font-family: "Lucida Sans Typewriter", "Lucida Console", "Courier New", monospace;
+
+  /* FIX: Make it BOLD and darker to fix legibility */
+  font-weight: 400;
+  color: #000000;
+  /* Darker grey than before */
+  opacity: 1;
+  /* Force full opacity for the color */
+
+  letter-spacing: 0.5px;
+  font-style: normal;
 }
 
 .main-prompt-textarea:hover {
@@ -892,39 +1018,27 @@
   box-shadow:
     0 4px 12px -1px rgba(0, 0, 0, 0.1),
     0 0 50px -5px rgba(245, 158, 11, 0.35);
-  /* Slightly stronger glow on hover */
 }
 
 .main-prompt-textarea:focus {
   border-color: #f59e0b;
-  /* Solid Gold on focus */
   outline: none;
   background-color: #fffbeb;
-  /* Very slight warm tint background */
-
-  /* Intensified Beacon Glow */
   box-shadow:
     0 0 0 4px rgba(245, 158, 11, 0.1),
-    /* Focus ring */
     0 0 70px -5px rgba(245, 158, 11, 0.4);
-  /* Stronger gold ambient glow */
   transform: translateY(-2px);
 }
 
-.main-prompt-textarea::placeholder {
-  color: #94a3b8;
-  opacity: 0.8;
-}
-
 [data-theme='dark'] .main-prompt-textarea {
-  background-color: #3b3b2e;
-  /* Pale dark yellow */
+  background-color: #3d3d2a;
+  /* Warmer yellow-brown tint */
   color: #ffffff;
   /* White text */
-  border-color: rgba(245, 158, 11, 0.5);
+  border-color: rgba(253, 224, 71, 0.5);
   box-shadow:
     0 4px 6px -1px rgba(0, 0, 0, 0.3),
-    0 0 60px -10px rgba(245, 158, 11, 0.35);
+    0 0 40px -10px rgba(253, 224, 71, 0.35);
 }
 
 [data-theme='dark'] .main-prompt-textarea::placeholder {
@@ -935,21 +1049,21 @@
 }
 
 [data-theme='dark'] .main-prompt-textarea:hover {
-  background-color: #454536;
-  /* Lighter pale yellow on hover */
-  border-color: rgba(245, 158, 11, 0.8);
+  background-color: #454530;
+  /* Lighter yellow-brown on hover */
+  border-color: rgba(253, 224, 71, 0.8);
   box-shadow:
     0 4px 12px -1px rgba(0, 0, 0, 0.4),
-    0 0 70px -5px rgba(245, 158, 11, 0.5);
+    0 0 70px -5px rgba(253, 224, 71, 0.5);
 }
 
 [data-theme='dark'] .main-prompt-textarea:focus {
-  background-color: #3b3b2e;
+  background-color: #3d3d2a;
   /* Keep base */
-  border-color: #f59e0b;
+  border-color: #fde047;
   box-shadow:
-    0 0 0 4px rgba(245, 158, 11, 0.3),
-    0 0 90px -5px rgba(245, 158, 11, 0.7);
+    0 0 0 4px rgba(253, 224, 71, 0.3),
+    0 0 90px -5px rgba(253, 224, 71, 0.7);
 }
 
 /* --- Examples Toggle --- */
@@ -1258,6 +1372,73 @@
   border-color: #991b1b;
 }
 
+.success-button {
+  background-color: #10b981;
+  /* Emerald Green */
+  color: white;
+  border: 1px solid #10b981;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.success-button:hover {
+  background-color: #059669;
+  border-color: #059669;
+  box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.3);
+  transform: translateY(-1px);
+}
+
+/* --- Global Button Styles (Primary & Neutral) --- */
+.primary-button {
+  background-color: var(--primary-blue);
+  color: white;
+  border: 1px solid var(--primary-blue);
+  border-radius: 8px;
+  padding: 10px 20px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.primary-button:hover {
+  background-color: var(--primary-blue-hover);
+  border-color: var(--primary-blue-hover);
+  box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.3);
+  transform: translateY(-1px);
+}
+
+.neutral-button {
+  background-color: var(--input-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 20px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.neutral-button:hover {
+  background-color: var(--hover-bg);
+  border-color: var(--text-secondary);
+  transform: translateY(-1px);
+}
+
 /* --- Destructive Button (Standardized) --- */
 .destructive-button {
   background: transparent;
@@ -1331,6 +1512,7 @@
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
   min-width: 160px;
   justify-content: space-between;
+  font-family: inherit !important;
 }
 
 .profile-dropdown-btn:hover {
@@ -1399,6 +1581,12 @@
 
 /* --- Onboarding Tour Styles --- */
 
+/* Portal wrapper - just a container, doesn't block anything */
+.onboarding-tour-portal {
+  /* No fixed positioning - children are individually fixed */
+  pointer-events: none;
+}
+
 /* The spotlight "hole" is created by a massive box-shadow */
 .tour-spotlight {
   position: fixed;
@@ -1433,6 +1621,8 @@
   flex-direction: column;
   justify-content: space-between;
   min-height: 250px;
+  pointer-events: auto;
+  /* Allow clicking on tour card buttons */
 }
 
 @keyframes tourFadeIn {
@@ -1461,17 +1651,27 @@
 }
 
 .tour-close {
-  background: none;
-  border: none;
-  font-size: 1.5rem;
-  color: #94a3b8;
-  cursor: pointer;
-  padding: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   line-height: 1;
+  color: #94a3b8;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
 }
 
 .tour-close:hover {
-  color: #64748b;
+  color: #dc2626;
+  background-color: #fee2e2;
 }
 
 .tour-body p {
@@ -1831,37 +2031,40 @@
 .inline-save-container {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 2px;
   background: var(--card-bg);
-  border: 1px solid var(--primary-color);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 4px 8px;
   height: 36px;
-  /* Match button height */
-  box-shadow: 0 0 12px rgba(16, 185, 129, 0.2);
-  animation: expandWidth 0.2s ease-out forwards;
+  box-sizing: border-box;
 }
 
-@keyframes expandWidth {
-  from {
-    width: 120px;
-    opacity: 0;
-  }
-
-  to {
-    width: auto;
-    opacity: 1;
-  }
+/* Only the container glows blue on focus */
+.inline-save-container:focus-within {
+  border-color: var(--primary-blue);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
 }
 
 .inline-save-input {
   background: transparent;
-  border: none;
+  border: none !important;
+  /* FORCE remove borders */
+  border-bottom: none !important;
+  /* Double-check remove underline */
+  box-shadow: none !important;
+  /* FORCE remove shadows */
+  outline: none !important;
+  /* FORCE remove focus ring */
+  border-radius: 0;
+
   color: var(--text-primary);
   font-size: 0.9rem;
   font-weight: 500;
-  width: 140px;
-  outline: none;
+
+  width: 100px;
+  /* Prevent it from being "too long" */
+  padding: 2px 0;
 }
 
 .inline-save-input::placeholder {
@@ -1869,75 +2072,47 @@
   opacity: 0.7;
 }
 
-.inline-save-actions {
-  display: flex;
-  gap: 4px;
-}
-
-.inline-save-btn {
+/* Standardized Action Buttons */
+.inline-action-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 4px;
-  border: none;
-  cursor: pointer;
+  transition: all 0.2s;
+
+  /* THIS FIXES THE SYMBOL */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  /* Force generic font */
   font-size: 1rem;
-  transition: all 0.2s ease;
-}
+  font-weight: bold;
+  /* Make it thick like the category checkmark */
 
-.inline-save-btn.primary {
-  background: #10b981;
-  /* Green */
-  color: white;
-}
-
-.inline-save-btn.primary:hover {
-  background: #059669;
-}
-
-.inline-save-btn.neutral {
-  background: transparent;
+  width: 28px;
+  height: 28px;
   color: var(--text-secondary);
-  border: 1px solid transparent;
 }
 
-.inline-save-btn.neutral:hover {
-  background: #fee2e2;
-  color: #ef4444;
-  border-color: #fecaca;
+.inline-action-btn:hover {
+  background-color: var(--hover-bg);
+  color: var(--text-primary);
 }
 
-.inline-save-warning {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  width: max-content;
-  max-width: 300px;
-  font-size: 0.75rem;
-  color: #f59e0b;
-  /* Warning Orange */
-  margin-top: 4px;
-  background: rgba(20, 20, 20, 0.9);
-  padding: 4px 8px;
-  border-radius: 4px;
-  border: 1px solid rgba(245, 158, 11, 0.3);
-  z-index: 10;
-  pointer-events: none;
-  animation: fadeIn 0.2s ease-out;
+.inline-action-btn.confirm {
+  color: var(--text-secondary);
 }
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
+.inline-action-btn.confirm:hover {
+  color: var(--success-green);
+  background-color: rgba(34, 197, 94, 0.1);
+}
 
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+.inline-action-btn.cancel:hover {
+  color: var(--primary-red);
+  background-color: rgba(239, 68, 68, 0.1);
 }
 
 /* Custom Validation Notification Area */

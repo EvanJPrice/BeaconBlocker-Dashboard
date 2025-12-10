@@ -45,7 +45,8 @@ function PresetsModal({ isOpen, onClose, presets, onLoad, onRename, onDelete }) 
             <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ height: 'auto', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
                 <div className="modal-header">
                     <h2>Manage Presets</h2>
-                    <button className="modal-close-button" onClick={handleModalClose}>&times;</button>
+                    {/* Updated Close Button to match X style */}
+                    <button className="modal-close-button" onClick={handleModalClose}>✕</button>
                 </div>
                 <div className="modal-body">
                     {safePresets.length === 0 ? (
@@ -73,8 +74,13 @@ function PresetsModal({ isOpen, onClose, presets, onLoad, onRename, onDelete }) 
                                                 onFocus={(e) => e.target.select()}
                                                 autoFocus
                                                 style={{ padding: '6px 10px', fontSize: '0.9rem', flex: 1 }}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') handleSaveEdit(preset.id);
+                                                    if (e.key === 'Escape') setEditingId(null);
+                                                }}
                                             />
-                                            <button className="primary-button" onClick={() => handleSaveEdit(preset.id)} style={{ padding: '6px 12px' }}>Save</button>
+                                            {/* Green Success Button */}
+                                            <button className="success-button" onClick={() => handleSaveEdit(preset.id)}>Save</button>
                                             <button className="neutral-button" onClick={() => setEditingId(null)} style={{ padding: '6px 12px' }}>Cancel</button>
                                         </div>
                                     ) : (
@@ -98,16 +104,12 @@ function PresetsModal({ isOpen, onClose, presets, onLoad, onRename, onDelete }) 
                                                     onClick={() => handleStartEdit(preset)}
                                                     title="Rename"
                                                 >
-                                                    Edit
+                                                    Rename
                                                 </button>
                                                 <button
-                                                    className={`neutral-button modal-action-btn ${deleteConfirmId === preset.id ? 'confirming' : ''}`}
+                                                    className={`destructive-button modal-action-btn ${deleteConfirmId === preset.id ? 'confirming' : ''}`}
                                                     onClick={() => handleDeleteClick(preset.id)}
                                                     title="Delete"
-                                                    style={{
-                                                        color: deleteConfirmId === preset.id ? 'white' : '#ef4444',
-                                                        borderColor: deleteConfirmId === preset.id ? '#dc2626' : '#ef4444'
-                                                    }}
                                                 >
                                                     {deleteConfirmId === preset.id ? 'Confirm?' : 'Delete'}
                                                 </button>
