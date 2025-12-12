@@ -18,12 +18,14 @@ export default function FeatureRequestModal({ isOpen, onClose, userId, userEmail
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        console.log('Feature submit clicked, idea:', idea);
         if (!idea.trim()) {
             alert('Please describe your feature idea.');
             return;
         }
 
         setLoading(true);
+        console.log('Submitting feature idea...');
 
         try {
             const timestamp = new Date().toISOString();
