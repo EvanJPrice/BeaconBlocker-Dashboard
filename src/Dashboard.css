@@ -1217,26 +1217,59 @@
 }
 
 /* Distinct Styles for Decisions */
-.log-item-allow {
-  background-color: var(--log-allow-bg);
-  /* Light Green / Dark Green Tint */
-  border-left: 4px solid var(--log-allow-border);
+/* Removed: .log-item-allow and .log-item-block since all logs are now blocks */
+/* Using neutral white/navy styling instead of red */
+.log-item {
+  background-color: #ffffff;
+  /* White in light mode */
+  border-left: 4px solid var(--border-color);
 }
 
-.log-item-block {
-  background-color: var(--log-block-bg);
-  /* Light Red / Dark Red Tint */
-  border-left: 4px solid var(--log-block-border);
+.log-item:hover {
+  background-color: #f8fafc;
+  /* Slight gray on hover - light mode */
 }
 
-.log-item-allow:hover {
-  filter: brightness(0.95);
-  /* Simple hover effect for both modes */
+[data-theme='dark'] .log-item {
+  background-color: #1e293b;
+  /* Navy in dark mode */
+  border-left-color: #475569;
 }
 
-.log-item-block:hover {
-  filter: brightness(0.95);
-  /* Simple hover effect for both modes */
+[data-theme='dark'] .log-item:hover {
+  background-color: #334155;
+  /* Lighter navy on hover - dark mode */
+}
+
+/* History Link Buttons (in expanded log items) */
+.history-link-button {
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  width: auto;
+  cursor: pointer;
+  background: var(--card-bg, #ffffff);
+  color: var(--text-primary, #1e293b);
+  border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.history-link-button:hover {
+  background: var(--input-bg, #f8fafc);
+  border-color: var(--text-secondary, #94a3b8);
+}
+
+[data-theme='dark'] .history-link-button {
+  background: #334155;
+  color: #e2e8f0;
+  border-color: #475569;
+}
+
+[data-theme='dark'] .history-link-button:hover {
+  background: #475569;
+  border-color: #64748b;
 }
 
 .log-icon {

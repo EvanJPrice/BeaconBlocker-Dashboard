@@ -5,8 +5,10 @@ import { ThemeSupa } from '@supabase/auth-ui-shared';
 import FullHistoryModal from './FullHistoryModal.jsx'; // Import for history modal
 import OnboardingTour from './OnboardingTour.jsx';
 import BugReportModal from './BugReportModal.jsx'; // Import BugReportModal
+import FeatureRequestModal from './FeatureRequestModal.jsx'; // Import FeatureRequestModal
 import UnloadPresetModal from './UnloadPresetModal';
 import DeleteAccountModal from './DeleteAccountModal';
+import { encryptPrompt, decryptPrompt } from './cryptoUtils.js'; // Prompt encryption for privacy
 
 import ProfileDropdown from './ProfileDropdown';
 // SavePresetModal removed as part of workflow refactor
@@ -46,6 +48,48 @@ function getBaseDomain(urlString) {
 const getFaviconUrl = (domain) => {
     return `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
 };
+
+// --- Extension Communication (for local block logs) ---
+// Uses CustomEvent bridge via content script
+
+async function fetchBlockLogsFromExtension() {
+    return new Promise((resolve) => {
+        let timeoutId = null;
+        let resolved = false;
+
+        // Set up one-time listener for response
+        const handleResponse = (event) => {
+            if (resolved) return; // Already resolved
+            resolved = true;
+            clearTimeout(timeoutId); // Cancel the timeout
+            window.removeEventListener('BEACON_BLOCK_LOG_RESPONSE', handleResponse);
+            // console.log('Dashboard: Received block log response', event.detail?.logs?.length || 0, 'entries');
+            resolve(event.detail?.logs || []);
+        };
+
+        // Listen for response
+        window.addEventListener('BEACON_BLOCK_LOG_RESPONSE', handleResponse);
+
+        // Request block logs via CustomEvent (content script bridges to background)
+        // console.log('Dashboard: Requesting block logs from extension');
+        document.dispatchEvent(new CustomEvent('BEACON_GET_BLOCK_LOG'));
+
+        // Timeout after 2 seconds if no response
+        timeoutId = setTimeout(() => {
+            if (resolved) return; // Already resolved
+            resolved = true;
+            window.removeEventListener('BEACON_BLOCK_LOG_RESPONSE', handleResponse);
+            // console.log('Dashboard: Block log request timed out');
+            resolve([]);
+        }, 2000);
+    });
+}
+
+function clearBlockLog() {
+    document.dispatchEvent(new CustomEvent('BEACON_CLEAR_BLOCK_LOG'));
+}
+
+
 
 // === Define categories for checkboxes ===
 const BLOCKED_CATEGORIES = [
@@ -87,7 +131,7 @@ const commonSiteMappings = {
 };
 
 // === Dashboard Component ===
-function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, extensionStatus }) {
+function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearch, theme, onThemeChange, extensionStatus }) {
     const [loading, setLoading] = useState(true);
     const [message, setMessage] = useState(null);
     const [apiKey, setApiKey] = useState(null);
@@ -138,6 +182,7 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
     const [presetOriginalState, setPresetOriginalState] = useState(null);
 
     const [isUnloadModalOpen, setIsUnloadModalOpen] = useState(false);
+    const [pendingLoadPreset, setPendingLoadPreset] = useState(null); // For custom confirm modal
 
     // Sync presetOriginalState when activePreset or presets change (handles load/refresh)
     useEffect(() => {
@@ -309,8 +354,18 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
             .select('*')
             .order('created_at', { ascending: false });
 
-        if (error) console.error('Error fetching presets:', error);
-        else setPresets(data || []);
+        if (error) {
+            console.error('Error fetching presets:', error);
+        } else if (data && session?.user?.id) {
+            // Decrypt prompts for display and comparison
+            const decryptedPresets = await Promise.all(data.map(async (preset) => ({
+                ...preset,
+                prompt: await decryptPrompt(preset.prompt, session.user.id)
+            })));
+            setPresets(decryptedPresets);
+        } else {
+            setPresets(data || []);
+        }
     };
 
     useEffect(() => {
@@ -564,10 +619,13 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
             await supabase.from('settings_presets').delete().eq('id', duplicate.id);
         }
 
+        // Encrypt prompt before storing for privacy
+        const encryptedPrompt = await encryptPrompt(mainPrompt, user.id);
+
         const presetData = {
             user_id: user.id,
             name,
-            prompt: mainPrompt,
+            prompt: encryptedPrompt,
             blocked_categories: blockedCategories,
             allow_list: allowListArray,
             block_list: blockListArray
@@ -609,8 +667,11 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
+        // Encrypt prompt before updating for privacy
+        const encryptedPrompt = await encryptPrompt(mainPrompt, user.id);
+
         const { error } = await supabase.from('settings_presets').update({
-            prompt: mainPrompt,
+            prompt: encryptedPrompt,
             blocked_categories: blockedCategories,
             allow_list: allowListArray,
             block_list: blockListArray
@@ -645,13 +706,21 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
     const handleLoadPreset = async (preset) => {
         // Only warn if there is UN-SAVED work that would be lost
         if (hasUnsavedChanges) {
-            if (!confirm("You have unsaved changes. Loading a preset will discard them. Continue?")) {
-                return;
-            }
+            // Show custom modal instead of browser confirm
+            setPendingLoadPreset(preset);
+            return;
         }
 
-        // Proceed immediately without the second "Are you sure?" popup
-        setMainPrompt(preset.prompt || '');
+        await executeLoadPreset(preset);
+    };
+
+    // Actual preset loading logic (called after confirmation or directly if no unsaved changes)
+    const executeLoadPreset = async (preset) => {
+
+        // Decrypt prompt if encrypted (for privacy)
+        const decryptedPrompt = await decryptPrompt(preset.prompt, session?.user?.id) || '';
+
+        setMainPrompt(decryptedPrompt);
         setBlockedCategories(preset.blocked_categories || {});
         setAllowListArray(preset.allow_list || []);
         setBlockListArray(preset.block_list || []);
@@ -772,54 +841,41 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
         }
     }, [mainPrompt]);
 
-    // --- Fetch Logs Function ---
+    // --- Fetch Logs Function (from Extension - Privacy First) ---
     const fetchLogs = async () => {
-        const currentUserId = session?.user?.id;
-        if (!currentUserId) return;
+        if (!session?.user?.id) return;
 
-        let { data: logData, error } = await supabase
-            .from('blocking_log')
-            .select('*')
-            .eq('user_id', currentUserId)
-            .order('created_at', { ascending: false })
-            .limit(20);
-
-        if (error) {
-            console.error("Error fetching logs:", error);
-        } else {
-            const filteredLogs = (logData || []).filter(log => log.reason !== 'System Rule (Infra)');
-            setLogs(filteredLogs);
+        try {
+            const extensionLogs = await fetchBlockLogsFromExtension();
+            // Transform to match expected log format
+            const formattedLogs = extensionLogs.map((log, index) => ({
+                id: `local-${log.timestamp}-${index}`,
+                url: log.url,
+                domain: log.domain,
+                decision: 'BLOCK', // All logs from extension are blocks
+                reason: log.reason,
+                page_title: log.pageTitle,
+                created_at: new Date(log.timestamp).toISOString()
+            }));
+            setLogs(formattedLogs);
+        } catch (error) {
+            console.error("Error fetching logs from extension:", error);
+            setLogs([]);
         }
     };
 
-    // --- Load user logs AND subscribe to new ones ---
+    // --- Load user logs and poll for updates ---
     useEffect(() => {
         const currentUserId = session?.user?.id;
         if (!currentUserId) return;
 
         fetchLogs();
 
-        const logChannel = supabase
-            .channel(`public:blocking_log:user_id=eq.${currentUserId}`)
-            .on(
-                'postgres_changes',
-                {
-                    event: 'INSERT',
-                    schema: 'public',
-                    table: 'blocking_log',
-                    filter: `user_id=eq.${currentUserId}`
-                },
-                (payload) => {
-                    console.log('New log received!', payload.new);
-                    if (payload.new.reason !== 'System Rule (Infra)') {
-                        setLogs(prevLogs => [payload.new, ...prevLogs]);
-                    }
-                }
-            )
-            .subscribe();
+        // Poll for new logs every 5 seconds (instead of real-time subscription)
+        const pollInterval = setInterval(fetchLogs, 5000);
 
         return () => {
-            supabase.removeChannel(logChannel);
+            clearInterval(pollInterval);
         };
 
     }, [session]);
@@ -1165,6 +1221,50 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
                 onUnload={handleUnloadPreset}
             />
 
+            {/* Load Preset Confirmation Modal */}
+            {pendingLoadPreset && (
+                <div className="modal-overlay" onClick={() => setPendingLoadPreset(null)}>
+                    <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+                        <h2 style={{ marginBottom: '1rem' }}>Unsaved Changes</h2>
+                        <p style={{ marginBottom: '1.5rem', color: 'var(--text-secondary)' }}>
+                            You have unsaved changes. Loading "{pendingLoadPreset.name}" will discard them.
+                        </p>
+                        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                            <button
+                                onClick={() => setPendingLoadPreset(null)}
+                                style={{
+                                    padding: '0.5rem 1rem',
+                                    background: 'var(--card-bg)',
+                                    border: '1px solid var(--border-color)',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    color: 'var(--text-primary)'
+                                }}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={async () => {
+                                    const presetToLoad = pendingLoadPreset;
+                                    setPendingLoadPreset(null);
+                                    await executeLoadPreset(presetToLoad);
+                                }}
+                                style={{
+                                    padding: '0.5rem 1rem',
+                                    background: '#dc2626',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Discard & Load
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <form onSubmit={(e) => e.preventDefault()}>
                 <div style={{ marginBottom: '1.5rem' }}>
                     <div className="beacon-light-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '0.5rem' }}>
@@ -1253,7 +1353,7 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
                                                 title={isPresetModified ? "Save changes to this preset" : "Click to rename preset"}
                                                 style={{ minWidth: '100px' }}
                                             >
-                                                {isPresetModified ? `Save "${activePreset.name}"` : activePreset.name}
+                                                {isPresetModified ? `Save to "${activePreset.name}"` : activePreset.name}
                                             </button>
 
                                             {/* UNLOAD BUTTON - Matches Cancel Style */}
@@ -1370,7 +1470,7 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
                                 Additional Controls
                             </h3>
                             <p style={{ margin: '4px 0 0 24px', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 'normal' }}>
-                                Advanced controls to fine-tune your blocking.
+                                Advanced controls to fine-tune your Beacon.
                             </p>
                         </div>
                     </div>
@@ -1500,7 +1600,7 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
                             </span>
                             Recent Activity
                         </h3>
-                        <p style={{ margin: '4px 0 0 24px', color: '#64748b', fontSize: '0.9rem' }}>See what's been blocked or allowed recently.</p>
+                        <p style={{ margin: '4px 0 0 24px', color: '#64748b', fontSize: '0.9rem' }}>See what's been blocked recently.</p>
                     </div>
 
                     {showLogs && (
@@ -1532,8 +1632,8 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
                                 fontSize: '0.85rem',
                                 transition: 'all 0.3s ease'
                             }}
-                            onMouseEnter={(e) => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#334155'; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#64748b'; }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--hover-bg, #f1f5f9)'; e.currentTarget.style.color = 'var(--text-primary, #334155)'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary, #64748b)'; }}
                         >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3" />
@@ -1549,7 +1649,7 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
                     <div className="log-feed-container">
                         {logs.length === 0 ? (
                             <div className="empty-logs" id="tour-recent-activity-item-0">
-                                <span style={{ fontSize: '2rem', marginBottom: '0.5rem', display: 'block' }}>📭</span>
+                                <span style={{ fontSize: '2rem', marginBottom: '0.5rem', display: 'block' }}>🌊</span>
                                 <p>No activity recorded yet.</p>
                                 <small>Browse the web to see Beacon in action.</small>
                             </div>
@@ -1557,26 +1657,22 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
                             <>
                                 <ul className="log-feed-list">
                                     {logs.slice(0, 5).map((log, index) => {
-                                        // Logic: Normalize decision to BLOCK or ALLOW
-                                        const rawDecision = log.decision ? log.decision.toUpperCase() : 'BLOCK';
-                                        const isCache = rawDecision.includes('CACHE') || (log.reason && log.reason.toLowerCase().includes('cache'));
-                                        const normalizedDecision = rawDecision.replace('_CACHE', ''); // BLOCK or ALLOW
-                                        const decisionClass = normalizedDecision.toLowerCase(); // 'allow' or 'block'
-                                        const decisionText = normalizedDecision;
+                                        // All logs are now blocks (no ALLOW logs)
+                                        const isCache = log.reason && log.reason.toLowerCase().includes('cache');
 
                                         // Reason text logic
-                                        let mainReason = log.reason;
-                                        let expandedReason = log.reason;
+                                        let mainReason = log.reason || 'Blocked';
+                                        let expandedReason = log.reason || 'Blocked';
 
                                         if (isCache) {
-                                            mainReason = "Previous AI Decision";
-                                            expandedReason = "Previous AI Decision (Decision stored in cache)";
+                                            mainReason = "Cached decision";
+                                            expandedReason = "Previously evaluated";
                                         }
                                         return (
                                             <li
                                                 key={log.id}
                                                 id={index === 0 ? 'tour-recent-activity-item-0' : undefined}
-                                                className={`log-item log-item-${decisionClass}`}
+                                                className="log-item"
                                                 onClick={() => setExpandedLogId(expandedLogId === log.id ? null : log.id)}
                                                 style={{ cursor: 'pointer', flexDirection: 'column', alignItems: 'stretch' }}
                                             >
@@ -1624,9 +1720,7 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
                                                             {mainReason}
                                                         </span>
                                                     </div>
-                                                    <div style={{ marginLeft: 'auto', paddingLeft: '1rem' }}>
-                                                        <span className={`decision-badge ${decisionClass}`}>{decisionText}</span>
-                                                    </div>
+                                                    {/* Decision badge removed - all logs are blocks now */}
                                                 </div>
 
                                                 {expandedLogId === log.id && (
@@ -1638,43 +1732,19 @@ function Dashboard({ session, onReportBug, onOpenHistory, theme, onThemeChange, 
                                                         {/* Feature: Link to history for this URL or Domain */}
                                                         <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
                                                             <button
+                                                                className="history-link-button"
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
-                                                                    setInitialSearchTerm(log.url);
-                                                                    setIsHistoryModalOpen(true);
-                                                                }}
-                                                                style={{
-                                                                    padding: '8px 12px',
-                                                                    fontSize: '0.85rem',
-                                                                    fontWeight: '600',
-                                                                    width: 'auto',
-                                                                    cursor: 'pointer',
-                                                                    background: '#ffffff',
-                                                                    color: '#1e293b',
-                                                                    border: '1px solid #cbd5e1',
-                                                                    borderRadius: '6px',
-                                                                    boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                                                                    if (onOpenHistoryWithSearch) onOpenHistoryWithSearch(log.url);
                                                                 }}
                                                             >
                                                                 View history for this specific page
                                                             </button>
                                                             <button
+                                                                className="history-link-button"
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
-                                                                    setInitialSearchTerm(log.domain);
-                                                                    setIsHistoryModalOpen(true);
-                                                                }}
-                                                                style={{
-                                                                    padding: '8px 12px',
-                                                                    fontSize: '0.85rem',
-                                                                    fontWeight: '600',
-                                                                    width: 'auto',
-                                                                    cursor: 'pointer',
-                                                                    background: '#ffffff',
-                                                                    color: '#1e293b',
-                                                                    border: '1px solid #cbd5e1',
-                                                                    borderRadius: '6px',
-                                                                    boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                                                                    if (onOpenHistoryWithSearch) onOpenHistoryWithSearch(log.domain);
                                                                 }}
                                                             >
                                                                 View history for {log.domain}
@@ -2049,10 +2119,18 @@ export default function App() {
     const [loading, setLoading] = useState(true);
     const [recoveryMode, setRecoveryMode] = useState(false);
     const [isBugReportModalOpen, setIsBugReportModalOpen] = useState(false);
+    const [isFeatureModalOpen, setIsFeatureModalOpen] = useState(false);
 
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+    const [initialSearchTerm, setInitialSearchTerm] = useState('');
 
     const [dashboardKey, setDashboardKey] = useState(0); // Key to force Dashboard refresh
+
+    // Handler to open history modal with a pre-filled search term
+    const handleOpenHistoryWithSearch = (searchTerm) => {
+        setInitialSearchTerm(searchTerm);
+        setIsHistoryModalOpen(true);
+    };
 
     // --- Extension Status State ---
     const [extensionStatus, setExtensionStatus] = useState('loading'); // 'loading', 'active', 'not_installed', 'logged_out'
@@ -2245,6 +2323,7 @@ export default function App() {
                         session={session}
                         onReportBug={() => setIsBugReportModalOpen(true)}
                         onOpenHistory={() => setIsHistoryModalOpen(true)}
+                        onOpenHistoryWithSearch={handleOpenHistoryWithSearch}
                         theme={theme}
                         onThemeChange={setTheme}
                         extensionStatus={extensionStatus}
@@ -2258,15 +2337,23 @@ export default function App() {
             )}
             <FullHistoryModal
                 isOpen={isHistoryModalOpen}
-                onClose={() => setIsHistoryModalOpen(false)}
+                onClose={() => { setIsHistoryModalOpen(false); setInitialSearchTerm(''); }}
                 userId={session?.user?.id}
                 getFaviconUrl={getFaviconUrl}
+                initialSearchTerm={initialSearchTerm}
                 onReportBug={() => setIsBugReportModalOpen(true)}
+                onShareFeature={() => setIsFeatureModalOpen(true)}
                 onHistoryCleared={handleHistoryCleared}
             />
             <BugReportModal
                 isOpen={isBugReportModalOpen}
                 onClose={() => setIsBugReportModalOpen(false)}
+                userId={session?.user?.id}
+                userEmail={session?.user?.email}
+            />
+            <FeatureRequestModal
+                isOpen={isFeatureModalOpen}
+                onClose={() => setIsFeatureModalOpen(false)}
                 userId={session?.user?.id}
                 userEmail={session?.user?.email}
             />

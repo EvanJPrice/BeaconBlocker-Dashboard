@@ -5,7 +5,7 @@ const LOGS_PER_PAGE = 50; // Number of logs to fetch at a time
 const BACKEND_URL = 'http://localhost:3000'; // Ensure this matches your running server
 
 // This component fetches and manages its own data
-export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUrl, initialSearchTerm = '', onHistoryCleared, onReportBug }) {
+export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUrl, initialSearchTerm = '', onHistoryCleared, onReportBug, onShareFeature }) {
     const [logs, setLogs] = useState([]);
     const [loading, setLoading] = useState(false);
     const [currentPage, setCurrentPage] = useState(0);
@@ -90,91 +90,73 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
         return () => clearTimeout(timer);
     }, [searchTerm]);
 
-    // Fetch the total count
+    // --- Fetch Logs from Extension (Privacy-First) ---
     useEffect(() => {
         if (isOpen && userId) {
-            async function fetchTotalCount() {
-                let query = supabase
-                    .from('blocking_log')
-                    .select('id', { count: 'exact', head: true })
-                    .eq('user_id', userId);
+            async function fetchLocalLogs() {
+                setLoading(true);
 
-                if (debouncedSearchTerm) {
-                    query = query.or(`url.ilike.%${debouncedSearchTerm}%,domain.ilike.%${debouncedSearchTerm}%,page_title.ilike.%${debouncedSearchTerm}%`);
+                try {
+                    // Request logs via CustomEvent bridge
+                    const extensionLogs = await new Promise((resolve) => {
+                        const handleResponse = (event) => {
+                            window.removeEventListener('BEACON_BLOCK_LOG_RESPONSE', handleResponse);
+                            resolve(event.detail?.logs || []);
+                        };
+                        window.addEventListener('BEACON_BLOCK_LOG_RESPONSE', handleResponse);
+                        document.dispatchEvent(new CustomEvent('BEACON_GET_BLOCK_LOG'));
+                        // Timeout after 2 seconds
+                        setTimeout(() => {
+                            window.removeEventListener('BEACON_BLOCK_LOG_RESPONSE', handleResponse);
+                            resolve([]);
+                        }, 2000);
+                    });
+
+                    // Transform to expected format
+                    let formattedLogs = extensionLogs.map((log, index) => ({
+                        id: `local-${log.timestamp}-${index}`,
+                        url: log.url,
+                        domain: log.domain,
+                        decision: 'BLOCK',
+                        reason: log.reason,
+                        page_title: log.pageTitle,
+                        created_at: new Date(log.timestamp).toISOString()
+                    }));
+
+                    // Apply search filter locally
+                    if (debouncedSearchTerm) {
+                        const term = debouncedSearchTerm.toLowerCase();
+                        formattedLogs = formattedLogs.filter(log =>
+                            log.url?.toLowerCase().includes(term) ||
+                            log.domain?.toLowerCase().includes(term) ||
+                            log.page_title?.toLowerCase().includes(term)
+                        );
+                    }
+
+                    setLogs(formattedLogs);
+                    setTotalLogs(formattedLogs.length);
+                } catch (error) {
+                    console.error("Error fetching logs from extension:", error);
+                    setLogs([]);
+                    setTotalLogs(0);
                 }
 
-                const { count, error } = await query;
-
-                if (error) {
-                    console.error("Error fetching log count:", error);
-                } else {
-                    setTotalLogs(count || 0);
-                }
+                setLoading(false);
             }
-            fetchTotalCount();
+            fetchLocalLogs();
         }
     }, [isOpen, userId, debouncedSearchTerm]);
 
-    // Fetch logs
-    useEffect(() => {
-        if (isOpen && userId) {
-            async function fetchHistoryPage() {
-                setLoading(true);
-                const from = currentPage * LOGS_PER_PAGE;
-                const to = from + LOGS_PER_PAGE - 1;
-
-                let query = supabase
-                    .from('blocking_log')
-                    .select('*')
-                    .eq('user_id', userId)
-                    .order('created_at', { ascending: false })
-                    .range(from, to);
-
-                if (debouncedSearchTerm) {
-                    query = query.or(`url.ilike.%${debouncedSearchTerm}%,domain.ilike.%${debouncedSearchTerm}%,page_title.ilike.%${debouncedSearchTerm}%`);
-                }
-
-                const { data, error } = await query;
-
-                if (error) {
-                    console.error("Error fetching log page:", error);
-                } else {
-                    setLogs(data || []);
-                }
-                setLoading(false);
-            }
-            fetchHistoryPage();
-        }
-    }, [isOpen, userId, currentPage, debouncedSearchTerm]);
-
     const [showClearConfirm, setShowClearConfirm] = useState(false);
 
-    // --- Clear History ---
+    // --- Clear History (Local Extension Storage + Cache) ---
     const handleClearHistory = async () => {
         try {
-            const { data: { session } } = await supabase.auth.getSession();
-            const token = session?.access_token;
+            // Clear local extension block log via CustomEvent bridge
+            document.dispatchEvent(new CustomEvent('BEACON_CLEAR_BLOCK_LOG'));
 
-            if (!token) {
-                alert("You must be logged in to clear history.");
-                return;
-            }
-
-            console.log("Attempting to clear history via:", `${BACKEND_URL}/clear-history`);
-
-            const response = await fetch(`${BACKEND_URL}/clear-history`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            if (!response.ok) {
-                const errData = await response.json().catch(() => ({}));
-                console.error("Clear history failed:", errData);
-                throw new Error(errData.error || "Failed to clear history");
-            }
+            // Also clear the decision cache so blocked sites are re-evaluated
+            window.dispatchEvent(new CustomEvent('BEACON_RULES_UPDATED'));
 
             // Clear local state
             setLogs([]);
@@ -202,17 +184,17 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
 
     return (
         <div className="modal-overlay" onClick={onClose}>
-            <div 
-                id="tour-full-history-modal" 
-                className="modal-content" 
-                ref={modalContentRef} 
-                onClick={e => e.stopPropagation()} 
-                style={{ 
-                    position: 'relative', 
+            <div
+                id="tour-full-history-modal"
+                className="modal-content"
+                ref={modalContentRef}
+                onClick={e => e.stopPropagation()}
+                style={{
+                    position: 'relative',
                     zIndex: 2001,
                     // FIX: Widen the modal significantly
-                    width: '90%', 
-                    maxWidth: '1000px' 
+                    width: '90%',
+                    maxWidth: '1000px'
                 }}
             >
                 <div className="modal-header" style={{ display: 'block', paddingBottom: '0' }}>
@@ -314,25 +296,22 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                                         {groupName}
                                     </h3>
                                     {groupLogs.map((log, logIndex) => {
-                                        const rawDecision = log.decision ? log.decision.toUpperCase() : 'BLOCK';
-                                        const isCache = rawDecision.includes('CACHE') || (log.reason && log.reason.toLowerCase().includes('cache'));
-                                        const normalizedDecision = rawDecision.replace('_CACHE', '');
-                                        const decisionClass = normalizedDecision.toLowerCase();
-                                        const decisionText = normalizedDecision;
+                                        // All logs are now blocks (no ALLOW logs)
+                                        const isCache = log.reason && log.reason.toLowerCase().includes('cache');
 
-                                        let mainReason = log.reason;
-                                        let expandedReason = log.reason;
+                                        let mainReason = log.reason || 'Blocked';
+                                        let expandedReason = log.reason || 'Blocked';
 
                                         if (isCache) {
-                                            mainReason = "Previous AI Decision";
-                                            expandedReason = "Previous AI Decision (Decision stored in cache)";
+                                            mainReason = "Cached decision";
+                                            expandedReason = "Previously evaluated";
                                         }
 
                                         return (
                                             <li
                                                 key={log.id}
                                                 id={groupIndex === 0 && logIndex === 0 ? 'tour-history-item-0' : undefined}
-                                                className={`log-item log-item-${decisionClass}`}
+                                                className="log-item"
                                                 onClick={() => setExpandedLogId(expandedLogId === log.id ? null : log.id)}
                                                 style={{ cursor: 'pointer', flexDirection: 'column', alignItems: 'stretch' }}
                                             >
@@ -372,9 +351,7 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                                                             {mainReason}
                                                         </span>
                                                     </div>
-                                                    <div style={{ marginLeft: 'auto', paddingLeft: '1rem' }}>
-                                                        <span className={`decision-badge ${decisionClass}`}>{decisionText}</span>
-                                                    </div>
+                                                    {/* Decision badge removed - all logs are blocks now */}
                                                 </div>
 
                                                 {expandedLogId === log.id && (
@@ -385,41 +362,19 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
 
                                                         <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
                                                             <button
+                                                                className="history-link-button"
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
                                                                     setSearchTerm(log.url);
-                                                                }}
-                                                                style={{
-                                                                    padding: '8px 12px',
-                                                                    fontSize: '0.85rem',
-                                                                    fontWeight: '600',
-                                                                    width: 'auto',
-                                                                    cursor: 'pointer',
-                                                                    background: '#ffffff',
-                                                                    color: '#1e293b',
-                                                                    border: '1px solid #cbd5e1',
-                                                                    borderRadius: '6px',
-                                                                    boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
                                                                 }}
                                                             >
                                                                 View history for this specific page
                                                             </button>
                                                             <button
+                                                                className="history-link-button"
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
                                                                     setSearchTerm(log.domain);
-                                                                }}
-                                                                style={{
-                                                                    padding: '8px 12px',
-                                                                    fontSize: '0.85rem',
-                                                                    fontWeight: '600',
-                                                                    width: 'auto',
-                                                                    cursor: 'pointer',
-                                                                    background: '#ffffff',
-                                                                    color: '#1e293b',
-                                                                    border: '1px solid #cbd5e1',
-                                                                    borderRadius: '6px',
-                                                                    boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
                                                                 }}
                                                             >
                                                                 View history for {log.domain}
@@ -449,9 +404,10 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
 
                     <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', fontSize: '0.85rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
                         <p style={{ margin: 0 }}>
-                            Tip: You can clear your cache or update blocking rules in the Dashboard settings.
+                            <strong>Note:</strong> For privacy, history is stored locally and limited to the last 50 entries.
                             <br />
                             Found a bug? <button onClick={onReportBug} className="link-button">Report it</button>.
+                            Have a feature idea? <button onClick={onShareFeature} className="link-button">Share it</button>.
                         </p>
                     </div>
                 </div>

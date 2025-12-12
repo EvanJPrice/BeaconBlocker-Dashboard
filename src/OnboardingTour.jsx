@@ -6,13 +6,13 @@ const STEPS = [
     {
         target: 'tour-welcome-header',
         title: "Welcome to Beacon Blocker",
-        content: "Your AI Guardian is ready to help you focus. Let's take a quick tour!",
+        content: "Your focus guardian is ready to help you stay on track. Let's take a quick tour!",
         position: 'center'
     },
     {
         target: 'tour-main-prompt',
         title: "Set Your Goal",
-        content: "This is your Beacon. Tell the AI what you're working on (e.g., 'Study Biology') and it will block distractions.",
+        content: "This is your Beacon. Describe what you're working on (e.g., 'Study Biology') and Beacon will block distractions.",
         position: 'bottom'
     },
     {
@@ -37,21 +37,21 @@ const STEPS = [
     {
         target: 'tour-additional-controls',
         title: "Inside: Categories & Lists",
-        content: "Here you can block entire categories (Social Media, Games, etc.) and manage your whitelist/blacklist. These override AI decisions.",
+        content: "Here you can block entire categories (Social Media, Games, etc.) and manage your whitelist/blacklist. These take priority over Beacon decisions.",
         position: 'top',
         requireOpen: 'controls' // Requires controls to be open
     },
     {
-        target: 'tour-recent-activity-container',
+        target: 'tour-recent-activity', // Changed target to match the element that is clicked
         title: "Recent Activity",
-        content: "This shows what's been blocked or allowed. Click to expand!",
+        content: "This shows sites that have been blocked. Click to expand!",
         position: 'top',
         waitForClick: 'activity'
     },
     {
-        target: 'tour-recent-activity-container',
+        target: 'tour-recent-activity-container', // Kept original target for this step as it refers to the container
         title: "Inside: Activity Log",
-        content: "Each entry shows a site that was blocked or allowed. Click on any log entry to see more details about why the decision was made.",
+        content: "Each entry shows a blocked site. Click on any entry to see more details about why it was blocked.",
         position: 'top',
         requireOpen: 'activity'
     },
