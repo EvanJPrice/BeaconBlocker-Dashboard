@@ -1,6 +1,17 @@
 /* Imports: IBM Plex Mono (Tech) & Herr Von Muellerhoff (The Handwriting) */
 @import url('https://fonts.googleapis.com/css2?family=Herr+Von+Muellerhoff&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
 
+/* Apply dark background at html level to prevent white flash */
+html {
+  background-color: #f0f7ff;
+  /* Light mode default */
+}
+
+html[data-theme='dark'] {
+  background-color: #0f172a;
+  /* Dark mode background */
+}
+
 :root {
   scrollbar-gutter: stable;
 

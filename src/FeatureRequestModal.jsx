@@ -32,23 +32,32 @@ export default function FeatureRequestModal({ isOpen, onClose, userId, userEmail
 
             // 1. Save to DB (using bug_reports table with type field)
             const { data: { session } } = await supabase.auth.getSession();
+            console.log('Session:', session ? 'Found' : 'None');
+
             const authHeader = session?.access_token
                 ? { 'Authorization': `Bearer ${session.access_token}` }
                 : {};
 
+            const payload = {
+                description: `[FEATURE IDEA] ${idea}`,
+                steps: '', // No steps for feature requests
+                anonymous: !userId,
+                user_id: userId,
+                user_email: manualEmail,
+                timestamp,
+                recipient: 'ej3price@gmail.com'
+            };
+            console.log('Sending payload:', payload);
+
             const response = await fetch('http://localhost:3000/report-bug', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', ...authHeader },
-                body: JSON.stringify({
-                    description: `[FEATURE IDEA] ${idea}`,
-                    steps: '', // No steps for feature requests
-                    anonymous: !userId,
-                    user_id: userId,
-                    user_email: manualEmail,
-                    timestamp,
-                    recipient: 'ej3price@gmail.com'
-                })
+                body: JSON.stringify(payload)
             });
+
+            console.log('Response status:', response.status);
+            const responseData = await response.json();
+            console.log('Response data:', responseData);
 
             if (!response.ok) throw new Error('Failed to send feature idea');
 
@@ -72,7 +81,7 @@ export default function FeatureRequestModal({ isOpen, onClose, userId, userEmail
         <div className="modal-overlay" onClick={onClose}>
             <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '500px', minHeight: 'auto', height: 'auto' }}>
                 <div className="modal-header">
-                    <h2>Share a Feature Idea</h2>
+                    <h2>Suggest a Feature</h2>
                     <button className="modal-close-button" onClick={onClose}>&times;</button>
                 </div>
 
@@ -131,6 +140,10 @@ export default function FeatureRequestModal({ isOpen, onClose, userId, userEmail
                         <button
                             type="submit"
                             disabled={loading}
+                            onClick={(e) => {
+                                e.preventDefault();
+                                handleSubmit(e);
+                            }}
                             style={{
                                 width: '100%',
                                 padding: '0.75rem',

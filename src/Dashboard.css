@@ -196,21 +196,44 @@
 }
 
 .category-card.active {
-  background-color: #fffbeb;
-  /* Light Gold Tint */
-  border-color: #fcd34d;
-  /* Gold Border */
-  box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.1);
+  /* Light mode: Cream/warm yellow background with strong yellow border */
+  background-color: #fef9e7;
+  /* Light cream/yellow tint - clearly different from white */
+  border: 2px solid #fbbf24;
+  /* Stronger amber border */
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.08),
+    0 0 25px -5px rgba(251, 191, 36, 0.5);
   color: #1e293b !important;
-  /* Force dark text for contrast */
 }
 
 .category-card.active .category-label {
   color: #1e293b !important;
+  /* Keep text dark/black */
 }
 
 .category-card.active .category-desc {
   color: #475569 !important;
+  /* Keep description dark gray */
+}
+
+/* Dark mode: Use warm yellow-brown background like main prompt textarea */
+[data-theme='dark'] .category-card.active {
+  background-color: #3d3d2a;
+  /* Warmer yellow-brown tint to match main prompt */
+  border: 1px solid rgba(253, 224, 71, 0.5);
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.3),
+    0 0 20px -5px rgba(253, 224, 71, 0.35);
+  color: #ffffff !important;
+}
+
+[data-theme='dark'] .category-card.active .category-label {
+  color: #ffffff !important;
+}
+
+[data-theme='dark'] .category-card.active .category-desc {
+  color: rgba(255, 255, 255, 0.8) !important;
 }
 
 /* Active state is now shown by background/border color only - no checkmark */
@@ -742,6 +765,26 @@
   overflow-y: auto;
   /* Makes the modal body scrollable */
   padding-top: 1rem;
+  background: var(--card-bg);
+}
+
+/* Custom scrollbar for modal */
+.modal-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.modal-body::-webkit-scrollbar-track {
+  background: var(--input-bg);
+  border-radius: 4px;
+}
+
+.modal-body::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+.modal-body::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
 }
 
 .full-history-list {
@@ -754,23 +797,31 @@
   align-items: center;
   margin-top: 1rem;
   padding-top: 1rem;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--border-color);
 }
 
 .pagination-controls button {
-  /* Reuse button styles */
+  /* Match dashboard button styling */
   padding: 8px 15px;
   font-size: 0.9rem;
   min-width: auto;
-  background-color: #007aff;
+  background-color: var(--primary-blue);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
+  font-weight: 500;
+  transition: background-color 0.2s, transform 0.1s;
+}
+
+.pagination-controls button:hover:not(:disabled) {
+  background-color: var(--primary-blue-hover);
+  transform: translateY(-1px);
 }
 
 .pagination-controls button:disabled {
-  background-color: #cccccc;
+  background-color: var(--border-color);
+  color: var(--text-secondary);
   cursor: not-allowed;
   opacity: 0.7;
 }
@@ -778,6 +829,7 @@
 .pagination-controls span {
   font-size: 0.9rem;
   font-weight: 500;
+  color: var(--text-primary);
 }
 
 /* --- Status Indicator Styles (Top-Right) --- */
@@ -1614,9 +1666,15 @@
 
 /* --- Onboarding Tour Styles --- */
 
-/* Portal wrapper - just a container, doesn't block anything */
+/* Portal wrapper - establishes high stacking context */
 .onboarding-tour-portal {
-  /* No fixed positioning - children are individually fixed */
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  z-index: 999999;
+  /* Highest possible to be above everything */
   pointer-events: none;
 }
 
@@ -1648,8 +1706,9 @@
   padding: 1.5rem;
   border-radius: 16px;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-  z-index: 10001;
-  animation: tourFadeIn 0.3s ease-out;
+  z-index: 99999;
+  /* Must be higher than any page element */
+  /* Removed animation to prevent initial position jump */
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -1724,17 +1783,21 @@
 
 .tour-dots {
   display: flex;
-  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  max-width: 130px;
+  /* 8 dots * 10px + 7 gaps * 4px = 108px, needs buffer for rounding */
 }
 
 .tour-dot {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: #e2e8f0;
   transition: background 0.3s ease;
-  margin: 0 4px;
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .tour-dot.active {
@@ -1765,15 +1828,60 @@
   background: #e2e8f0;
 }
 
-/* Arrow for Top Right (Extension) */
+/* Arrow for Top Right (Extension) - points to extension icons area */
 .tour-card.arrow-top-right::after {
   content: '';
   position: absolute;
   top: -10px;
-  right: 20px;
+  right: 150px;
+  /* Points toward where extension icons typically are */
   border-width: 0 10px 10px 10px;
   border-style: solid;
   border-color: transparent transparent white transparent;
+}
+
+/* Dark Mode Tour Card Styles */
+[data-theme='dark'] .tour-card {
+  background: var(--card-bg);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme='dark'] .tour-card.arrow-top-right::after {
+  border-color: transparent transparent var(--card-bg) transparent;
+}
+
+[data-theme='dark'] .tour-header h3 {
+  color: var(--text-primary);
+}
+
+[data-theme='dark'] .tour-close {
+  color: var(--text-secondary);
+}
+
+[data-theme='dark'] .tour-close:hover {
+  color: #f87171;
+  background-color: rgba(239, 68, 68, 0.15);
+}
+
+[data-theme='dark'] .tour-body p {
+  color: var(--text-secondary);
+}
+
+[data-theme='dark'] .tour-dot {
+  background: var(--border-color);
+}
+
+[data-theme='dark'] .tour-dot.active {
+  background: var(--primary-blue);
+}
+
+[data-theme='dark'] .tour-btn.secondary {
+  background: var(--input-bg);
+  color: var(--text-primary);
+}
+
+[data-theme='dark'] .tour-btn.secondary:hover {
+  background: var(--hover-bg);
 }
 
 /* --- Profile Dropdown Items --- */

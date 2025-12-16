@@ -323,7 +323,8 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
             let loadedMainPrompt = '', loadedApiKey = null, loadedCategories = initialCategories, loadedAllowList = [], loadedBlockList = [], loadedActivePresetId = null;
 
             if (data) {
-                loadedMainPrompt = data.prompt || '';
+                // Decrypt prompt if encrypted (for privacy)
+                loadedMainPrompt = await decryptPrompt(data.prompt, user.id) || '';
                 loadedApiKey = data.api_key;
                 loadedCategories = data.blocked_categories || initialCategories;
                 loadedAllowList = Array.isArray(data.allow_list) ? data.allow_list : [];
@@ -339,7 +340,9 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
             if (loadedActivePresetId) {
                 const { data: presetData } = await supabase.from('settings_presets').select('*').eq('id', loadedActivePresetId).single();
                 if (presetData) {
-                    setActivePreset({ id: presetData.id, name: presetData.name });
+                    // Decrypt preset name for display
+                    const decryptedName = await decryptPrompt(presetData.name, user.id);
+                    setActivePreset({ id: presetData.id, name: decryptedName });
                 }
             }
         }
@@ -349,22 +352,30 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
 
     // --- Fetch Presets ---
     const fetchPresets = async () => {
+        if (!session?.user?.id) return;
+
         const { data, error } = await supabase
             .from('settings_presets')
             .select('*')
+            .eq('user_id', session.user.id) // Only fetch this user's presets
             .order('created_at', { ascending: false });
 
         if (error) {
             console.error('Error fetching presets:', error);
-        } else if (data && session?.user?.id) {
-            // Decrypt prompts for display and comparison
-            const decryptedPresets = await Promise.all(data.map(async (preset) => ({
-                ...preset,
-                prompt: await decryptPrompt(preset.prompt, session.user.id)
-            })));
+        } else if (data) {
+            // Decrypt names and prompts for display and comparison
+            const decryptedPresets = await Promise.all(data.map(async (preset) => {
+                const decryptedName = await decryptPrompt(preset.name, session.user.id);
+                const decryptedPrompt = await decryptPrompt(preset.prompt, session.user.id);
+                return {
+                    ...preset,
+                    name: decryptedName,
+                    prompt: decryptedPrompt
+                };
+            }));
             setPresets(decryptedPresets);
         } else {
-            setPresets(data || []);
+            setPresets([]);
         }
     };
 
@@ -413,9 +424,12 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
 
         const presetIdToSave = activePresetId !== undefined ? activePresetId : (activePreset ? activePreset.id : null);
 
+        // Encrypt prompt before saving for privacy
+        const encryptedPrompt = await encryptPrompt(data.prompt, session.user.id);
+
         const { error } = await supabase.from('rules').upsert({
             user_id: session.user.id,
-            prompt: data.prompt,
+            prompt: encryptedPrompt,
             blocked_categories: data.blocked_categories,
             allow_list: data.allow_list,
             block_list: data.block_list,
@@ -447,11 +461,33 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
 
             // CRITICAL: Tell the extension to clear its cache so new rules take effect
             window.dispatchEvent(new CustomEvent('BEACON_RULES_UPDATED'));
+
+            // Signal the backend to increment cache version so extension invalidates its cache
+            try {
+                const authToken = (await supabase.auth.getSession()).data.session?.access_token;
+                if (authToken) {
+                    fetch('http://localhost:3000/update-rules-signal', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${authToken}`
+                        }
+                    }).catch(err => console.log('Cache invalidation signal skipped:', err.message));
+                }
+            } catch (e) {
+                console.log('Cache invalidation signal skipped:', e.message);
+            }
         }
     };
 
     // --- Inline Save Handlers ---
+    const MAX_PRESETS = 10;
+
     const handleStartSavePreset = () => {
+        if (presets.length >= MAX_PRESETS) {
+            setSaveWarning(`Preset limit (10) reached. Please delete an existing preset to save a new one.`);
+            return;
+        }
         setNewPresetName(`Preset_${presets.length + 1}`);
         setIsSavingPreset(true);
         setSaveWarning(null);
@@ -511,10 +547,14 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
             await supabase.from('settings_presets').delete().eq('id', overwriteId);
         }
 
+        // Encrypt name and prompt before storing for privacy
+        const encryptedName = await encryptPrompt(name, session.user.id);
+        const encryptedPrompt = await encryptPrompt(mainPrompt, session.user.id);
+
         const newPreset = {
             user_id: session.user.id,
-            name: name,
-            prompt: mainPrompt,
+            name: encryptedName,
+            prompt: encryptedPrompt,
             blocked_categories: blockedCategories,
             allow_list: allowListArray,
             block_list: blockListArray
@@ -547,8 +587,8 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
             });
             setHasUnsavedChanges(false);
 
-            // Set as active
-            setActivePreset({ id: data.id, name: data.name });
+            // Set as active (use original name, not encrypted data.name)
+            setActivePreset({ id: data.id, name: name });
 
             // Sync presetOriginalState
             setPresetOriginalState({
@@ -573,7 +613,19 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
 
         const name = newPresetName.trim();
 
-        // 1. Check for Duplicate Content
+        // Clear any previous warnings first
+        setSaveWarning(null);
+        setOverwriteCandidate(null);
+
+        // 1. Check for Duplicate Name first
+        const duplicateName = presets.find(p => p.name.toLowerCase() === name.toLowerCase());
+        console.log('Checking for duplicate name:', name, 'Found:', duplicateName?.name);
+        if (duplicateName) {
+            setOverwriteCandidate(duplicateName);
+            return;
+        }
+
+        // 2. Check for Duplicate Content (same settings as existing preset)
         const currentSettings = {
             prompt: mainPrompt,
             blocked_categories: blockedCategories,
@@ -581,26 +633,26 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
             block_list: blockListArray
         };
 
-        const duplicateContent = presets.find(p => areSettingsEqual({
-            prompt: p.prompt,
-            blocked_categories: p.blocked_categories,
-            allow_list: p.allow_list,
-            block_list: p.block_list
-        }, currentSettings));
+        console.log('Checking for duplicate content. Current prompt:', mainPrompt?.substring(0, 50));
+        console.log('Presets count:', presets.length);
+
+        const duplicateContent = presets.find(p => {
+            const isMatch = areSettingsEqual({
+                prompt: p.prompt,
+                blocked_categories: p.blocked_categories,
+                allow_list: p.allow_list,
+                block_list: p.block_list
+            }, currentSettings);
+            console.log('Comparing with preset:', p.name, '- Match:', isMatch);
+            return isMatch;
+        });
 
         if (duplicateContent) {
-            setSaveWarning(`Settings match existing preset: "${duplicateContent.name}"`);
+            setSaveWarning(`These settings already exist in preset: "${duplicateContent.name}"`);
             return;
         }
 
-        // 2. Check for Duplicate Name
-        const duplicateName = presets.find(p => p.name.toLowerCase() === name.toLowerCase());
-        if (duplicateName) {
-            setOverwriteCandidate(duplicateName);
-            return;
-        }
-
-        // No duplicates, proceed to save
+        // No blocking duplicates, proceed to save
         await executeSave(name);
     };
 
@@ -619,12 +671,13 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
             await supabase.from('settings_presets').delete().eq('id', duplicate.id);
         }
 
-        // Encrypt prompt before storing for privacy
+        // Encrypt name and prompt before storing for privacy
         const encryptedPrompt = await encryptPrompt(mainPrompt, user.id);
+        const encryptedName = await encryptPrompt(name, user.id);
 
         const presetData = {
             user_id: user.id,
-            name,
+            name: encryptedName,
             prompt: encryptedPrompt,
             blocked_categories: blockedCategories,
             allow_list: allowListArray,
@@ -661,6 +714,29 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
         if (!activePreset || !activePreset.id) {
             console.error('No active preset or missing ID');
             alert('Error: Active preset is missing ID. Please reload the preset.');
+            return;
+        }
+
+        // Check if these settings would duplicate another preset (excluding current)
+        const currentSettings = {
+            prompt: mainPrompt,
+            blocked_categories: blockedCategories,
+            allow_list: allowListArray,
+            block_list: blockListArray
+        };
+
+        const duplicateContent = presets.find(p =>
+            p.id !== activePreset.id &&
+            areSettingsEqual({
+                prompt: p.prompt,
+                blocked_categories: p.blocked_categories,
+                allow_list: p.allow_list,
+                block_list: p.block_list
+            }, currentSettings)
+        );
+
+        if (duplicateContent) {
+            setSaveWarning(`These settings already match preset: "${duplicateContent.name}"`);
             return;
         }
 
@@ -728,23 +804,30 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
         console.log('Setting active preset:', { id: preset.id, name: preset.name });
         setActivePreset({ id: preset.id, name: preset.name });
 
+        // Use decrypted prompt for comparison so isPresetModified works correctly
         setPresetOriginalState({
-            prompt: preset.prompt || '',
+            prompt: decryptedPrompt,
             blocked_categories: preset.blocked_categories || {},
             allow_list: preset.allow_list || [],
             block_list: preset.block_list || []
         });
 
+        // Clear any rename mode
+        setIsRenamingPreset(false);
+        setIsSavingPreset(false);
+        setSaveWarning(null);
+        setOverwriteCandidate(null);
+
         // Save the new state to the DB immediately
         await saveToSupabase({
-            prompt: preset.prompt,
+            prompt: decryptedPrompt,
             blocked_categories: preset.blocked_categories,
             allow_list: preset.allow_list,
             block_list: preset.block_list
         }, preset.id);
 
         setLastCheckpoint({
-            prompt: preset.prompt || '',
+            prompt: decryptedPrompt,
             blocked_categories: preset.blocked_categories || {},
             allow_list: preset.allow_list || [],
             block_list: preset.block_list || []
@@ -855,6 +938,7 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                 decision: 'BLOCK', // All logs from extension are blocks
                 reason: log.reason,
                 page_title: log.pageTitle,
+                active_prompt: log.activePrompt || null, // Include active prompt for filtering
                 created_at: new Date(log.timestamp).toISOString()
             }));
             setLogs(formattedLogs);
@@ -863,7 +947,6 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
             setLogs([]);
         }
     };
-
     // --- Load user logs and poll for updates ---
     useEffect(() => {
         const currentUserId = session?.user?.id;
@@ -1121,6 +1204,7 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                 <div id="tour-welcome-header" style={{ display: 'flex', alignItems: 'center', gap: '20px', position: 'relative' }}>
                     {/* Logo Wrapper with Beacon Light and Save Glow */}
                     <div
+                        id="tour-auto-sync"
                         className={`logo-wrapper ${saveStatus === 'saving' ? 'saving' : saveStatus === 'saved' ? 'saved' : ''}`}
                         style={{
                             position: 'relative',
@@ -1221,50 +1305,6 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                 onUnload={handleUnloadPreset}
             />
 
-            {/* Load Preset Confirmation Modal */}
-            {pendingLoadPreset && (
-                <div className="modal-overlay" onClick={() => setPendingLoadPreset(null)}>
-                    <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '400px' }}>
-                        <h2 style={{ marginBottom: '1rem' }}>Unsaved Changes</h2>
-                        <p style={{ marginBottom: '1.5rem', color: 'var(--text-secondary)' }}>
-                            You have unsaved changes. Loading "{pendingLoadPreset.name}" will discard them.
-                        </p>
-                        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-                            <button
-                                onClick={() => setPendingLoadPreset(null)}
-                                style={{
-                                    padding: '0.5rem 1rem',
-                                    background: 'var(--card-bg)',
-                                    border: '1px solid var(--border-color)',
-                                    borderRadius: '6px',
-                                    cursor: 'pointer',
-                                    color: 'var(--text-primary)'
-                                }}
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={async () => {
-                                    const presetToLoad = pendingLoadPreset;
-                                    setPendingLoadPreset(null);
-                                    await executeLoadPreset(presetToLoad);
-                                }}
-                                style={{
-                                    padding: '0.5rem 1rem',
-                                    background: '#dc2626',
-                                    color: 'white',
-                                    border: 'none',
-                                    borderRadius: '6px',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                Discard & Load
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
             <form onSubmit={(e) => e.preventDefault()}>
                 <div style={{ marginBottom: '1.5rem' }}>
                     <div className="beacon-light-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '0.5rem' }}>
@@ -1277,9 +1317,31 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                         </label>
 
                         {/* Validation Notification Area */}
-                        {(saveWarning || overwriteCandidate) && (
+                        {(saveWarning || overwriteCandidate || pendingLoadPreset) && (
                             <div className="validation-notification">
-                                {overwriteCandidate ? (
+                                {pendingLoadPreset ? (
+                                    <>
+                                        <span className="validation-text">Unsaved changes. Load "{pendingLoadPreset.name}" anyway?</span>
+                                        <div className="validation-actions">
+                                            <button
+                                                className="validation-btn confirm"
+                                                onClick={async () => {
+                                                    const presetToLoad = pendingLoadPreset;
+                                                    setPendingLoadPreset(null);
+                                                    await executeLoadPreset(presetToLoad);
+                                                }}
+                                            >
+                                                Yes
+                                            </button>
+                                            <button
+                                                className="validation-btn cancel"
+                                                onClick={() => setPendingLoadPreset(null)}
+                                            >
+                                                No
+                                            </button>
+                                        </div>
+                                    </>
+                                ) : overwriteCandidate ? (
                                     <>
                                         <span className="validation-text">Preset "{overwriteCandidate.name}" exists. Overwrite?</span>
                                         <div className="validation-actions">
@@ -1321,7 +1383,7 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
 
                         <div style={{ width: '1px', height: '20px', background: 'var(--border-color)' }}></div>
 
-                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                        <div id="tour-presets-section" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
 
                             {/* --- ACTIVE PRESET SECTION --- */}
                             {activePreset ? (
@@ -1348,6 +1410,7 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                                         // --- ACTIVE PRESET DISPLAY ---
                                         <>
                                             <button
+                                                id="tour-update-preset-btn"
                                                 className={`preset-button ${isPresetModified ? 'primary' : 'neutral'}`}
                                                 onClick={isPresetModified ? handleUpdateActivePreset : handleStartRename}
                                                 title={isPresetModified ? "Save changes to this preset" : "Click to rename preset"}
@@ -1368,7 +1431,18 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                                         </>
                                     )}
                                 </div>
-                            ) : null}
+                            ) : (
+                                // Show disabled "Save To" button when no preset is loaded
+                                <button
+                                    id="tour-update-preset-btn"
+                                    className="preset-button neutral"
+                                    disabled
+                                    title="Load a preset to enable this button"
+                                    style={{ minWidth: '100px', opacity: 0.5, cursor: 'not-allowed' }}
+                                >
+                                    Save To (None)
+                                </button>
+                            )}
 
                             {/* --- SAVE AS BUTTON --- */}
                             {isSavingPreset ? (
@@ -1618,7 +1692,7 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                                 });
                             }}
                             className="refresh-button"
-                            title="Refresh Logs"
+                            title="Reload logs from extension (doesn't clear history)"
                             style={{
                                 background: 'transparent',
                                 border: '1px solid #e2e8f0',
@@ -1724,22 +1798,16 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                                                 </div>
 
                                                 {expandedLogId === log.id && (
-                                                    <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e2e8f0', fontSize: '0.9rem', color: '#475569' }}>
-                                                        <p><strong>Full URL:</strong> <a href={log.url} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', wordBreak: 'break-all' }}>{log.url}</a></p>
+                                                    <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                                                        <p style={{ display: 'flex', alignItems: 'baseline', gap: '0.25rem' }}><strong>URL:</strong> <a href={log.url} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '400px', display: 'inline-block' }}>{log.url}</a></p>
                                                         <p><strong>Reason:</strong> {expandedReason}</p>
+                                                        {log.active_prompt && (
+                                                            <p><strong>Instructions:</strong> "{log.active_prompt}"</p>
+                                                        )}
                                                         <p><strong>Time:</strong> {new Date(log.created_at).toLocaleString()}</p>
 
-                                                        {/* Feature: Link to history for this URL or Domain */}
+                                                        {/* Feature: Link to history for Domain or Prompt */}
                                                         <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
-                                                            <button
-                                                                className="history-link-button"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    if (onOpenHistoryWithSearch) onOpenHistoryWithSearch(log.url);
-                                                                }}
-                                                            >
-                                                                View history for this specific page
-                                                            </button>
                                                             <button
                                                                 className="history-link-button"
                                                                 onClick={(e) => {
@@ -1747,8 +1815,20 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                                                                     if (onOpenHistoryWithSearch) onOpenHistoryWithSearch(log.domain);
                                                                 }}
                                                             >
-                                                                View history for {log.domain}
+                                                                View all from {log.domain}
                                                             </button>
+                                                            {log.active_prompt && (
+                                                                <button
+                                                                    className="history-link-button"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        if (onOpenHistoryWithSearch) onOpenHistoryWithSearch(log.active_prompt);
+                                                                    }}
+                                                                    title={`Filter by: "${log.active_prompt}"`}
+                                                                >
+                                                                    View all with this prompt
+                                                                </button>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 )}
@@ -1779,6 +1859,7 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                 isOpen={isPresetsModalOpen}
                 onClose={() => setIsPresetsModalOpen(false)}
                 presets={presets}
+                activePresetId={activePreset?.id}
                 onLoad={handleLoadPreset}
                 onRename={handleRenamePreset}
                 onDelete={handleDeletePreset}
@@ -2205,6 +2286,13 @@ export default function App() {
         // Handle Bug Report
         if (params.get('reportBug') === 'true') {
             setIsBugReportModalOpen(true);
+            // Clean URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+
+        // Handle Feature Request
+        if (params.get('shareFeature') === 'true') {
+            setIsFeatureModalOpen(true);
             // Clean URL
             window.history.replaceState({}, document.title, window.location.pathname);
         }

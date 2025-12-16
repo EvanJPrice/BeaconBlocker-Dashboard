@@ -4,6 +4,17 @@ import { supabase } from './supabaseClient';
 const LOGS_PER_PAGE = 50; // Number of logs to fetch at a time
 const BACKEND_URL = 'http://localhost:3000'; // Ensure this matches your running server
 
+// Rotating tips for the history modal
+const TIPS = [
+    "For privacy, your history is stored locally on your device and limited to the last 200 entries.",
+    "Your settings automatically sync whenever you make changes — no need to hit save!",
+    "Beacon uses caching to speed things up. If a site was recently checked, the cached decision is used instead of re-asking the AI.",
+    "Clear your cache from the extension popup if you've updated your rules and want sites to be re-evaluated immediately.",
+    "The 'Always Allow' and 'Always Block' lists override all other rules, including AI decisions and category blocks.",
+    "Quick categories are broad — selecting 'Gaming' will block all gaming-related content on the web, from YouTube to Reddit.",
+    "Tip: You can click the circles in the tutorial to skip to any tip!"
+];
+
 // This component fetches and manages its own data
 export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUrl, initialSearchTerm = '', onHistoryCleared, onReportBug, onShareFeature }) {
     const [logs, setLogs] = useState([]);
@@ -13,6 +24,7 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
     const [searchTerm, setSearchTerm] = useState(initialSearchTerm); // Search state
     const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(initialSearchTerm); // Debounced search state
     const [expandedLogId, setExpandedLogId] = useState(null); // Click to expand log details
+    const [tipIndex, setTipIndex] = useState(0); // Rotating tip index
 
     const modalContentRef = useRef(null);
 
@@ -120,6 +132,7 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                         decision: 'BLOCK',
                         reason: log.reason,
                         page_title: log.pageTitle,
+                        active_prompt: log.activePrompt || null,
                         created_at: new Date(log.timestamp).toISOString()
                     }));
 
@@ -129,7 +142,8 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                         formattedLogs = formattedLogs.filter(log =>
                             log.url?.toLowerCase().includes(term) ||
                             log.domain?.toLowerCase().includes(term) ||
-                            log.page_title?.toLowerCase().includes(term)
+                            log.page_title?.toLowerCase().includes(term) ||
+                            log.active_prompt?.toLowerCase().includes(term)
                         );
                     }
 
@@ -355,9 +369,17 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                                                 </div>
 
                                                 {expandedLogId === log.id && (
-                                                    <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-                                                        <p><strong>Full URL:</strong> <a href={log.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--link-color)', wordBreak: 'break-all' }}>{log.url}</a></p>
+                                                    <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                                                        <p>
+                                                            <strong>URL:</strong>{' '}
+                                                            <a href={log.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--link-color)' }}>
+                                                                {log.domain}{new URL(log.url).pathname.length > 30 ? new URL(log.url).pathname.substring(0, 30) + '...' : new URL(log.url).pathname}
+                                                            </a>
+                                                        </p>
                                                         <p><strong>Reason:</strong> {expandedReason}</p>
+                                                        {log.active_prompt && (
+                                                            <p><strong>Instructions:</strong> "{log.active_prompt.trim()}"</p>
+                                                        )}
                                                         <p><strong>Time:</strong> {new Date(log.created_at).toLocaleString()}</p>
 
                                                         <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
@@ -365,20 +387,23 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                                                                 className="history-link-button"
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
-                                                                    setSearchTerm(log.url);
-                                                                }}
-                                                            >
-                                                                View history for this specific page
-                                                            </button>
-                                                            <button
-                                                                className="history-link-button"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
                                                                     setSearchTerm(log.domain);
                                                                 }}
                                                             >
-                                                                View history for {log.domain}
+                                                                View all from {log.domain}
                                                             </button>
+                                                            {log.active_prompt && (
+                                                                <button
+                                                                    className="history-link-button"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setSearchTerm(log.active_prompt);
+                                                                    }}
+                                                                    title={`Filter by: "${log.active_prompt}"`}
+                                                                >
+                                                                    View all with this prompt
+                                                                </button>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 )}
@@ -403,9 +428,24 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                     </div>
 
                     <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', fontSize: '0.85rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
-                        <p style={{ margin: 0 }}>
-                            <strong>Note:</strong> For privacy, history is stored locally and limited to the last 50 entries.
-                            <br />
+                        <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: '0.5rem', margin: 0, minHeight: '3em' }}>
+                            <button
+                                onClick={() => setTipIndex((tipIndex - 1 + TIPS.length) % TIPS.length)}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '1.2rem', padding: '0 8px' }}
+                                title="Previous tip"
+                            >
+                                ‹
+                            </button>
+                            <span style={{ textAlign: 'center' }}><strong>Tip:</strong> {TIPS[tipIndex]}</span>
+                            <button
+                                onClick={() => setTipIndex((tipIndex + 1) % TIPS.length)}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '1.2rem', padding: '0 8px' }}
+                                title="Next tip"
+                            >
+                                ›
+                            </button>
+                        </div>
+                        <p style={{ margin: '0.5rem 0 0 0' }}>
                             Found a bug? <button onClick={onReportBug} className="link-button">Report it</button>.
                             Have a feature idea? <button onClick={onShareFeature} className="link-button">Share it</button>.
                         </p>
