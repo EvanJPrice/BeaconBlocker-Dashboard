@@ -26,7 +26,7 @@ const STEPS = [
     {
         target: 'tour-presets-section',
         title: "Presets",
-        content: "These buttons allow you to save presets for different kinds of browsing \n\n(e.g. Work/School/Personal).",
+        content: "These buttons allow you to save presets for different kinds of browsing \n\n(e.g. Work/School/Personal)",
         position: 'bottom'
     },
     {
@@ -66,7 +66,7 @@ const STEPS = [
     {
         target: 'tour-categories',
         title: "Categories",
-        content: "The **Quick Block Categories** are broad. These will instruct the AI to notice anything related to the category and block it for you \n\n(e.g. Gaming related content on YouTube will be blocked if **Gaming** is selected).",
+        content: "The **Quick Block Categories** are broad and domain agnostic. These will instruct Beacon Blocker to notice anything related to the category and block it for you. \n\n(e.g. Gaming related content on YouTube will be blocked if **Gaming** is selected).",
         position: 'top',
         requireOpen: 'controls'
     },
@@ -764,7 +764,7 @@ export default function OnboardingTour({ onClose, onOpenHistory, onCloseHistory,
                         <>
                             <p>{parseBold(currentStep.content.split('\n\n(')[0])}</p>
                             <p className="tour-hint">
-                                ({currentStep.content.split('\n\n(')[1]}
+                                ({parseBold(currentStep.content.split('\n\n(')[1])}
                             </p>
                         </>
                     ) : (

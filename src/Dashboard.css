@@ -1774,11 +1774,10 @@
 
 .tour-body .tour-hint {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   margin-top: 10px;
   font-style: italic;
   text-align: center;
-  opacity: 0.9;
 }
 
 .tour-footer {
