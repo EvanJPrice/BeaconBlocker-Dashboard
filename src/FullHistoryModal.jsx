@@ -1,19 +1,40 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
+import config from './config.js';
 
 const LOGS_PER_PAGE = 50; // Number of logs to fetch at a time
-const BACKEND_URL = 'http://localhost:3000'; // Ensure this matches your running server
+const BACKEND_URL = config.BACKEND_URL;
 
 // Rotating tips for the history modal
 const TIPS = [
-    "For privacy, your history is stored locally on your device and limited to the last 200 entries.",
+    "For privacy, your history is stored locally on your device.",
     "Your settings automatically sync whenever you make changes — no need to hit save!",
     "Beacon uses caching to speed things up. If a site was recently checked, the cached decision is used instead of re-asking the AI.",
     "Clear your cache from the extension popup if you've updated your rules and want sites to be re-evaluated immediately.",
     "The 'Always Allow' and 'Always Block' lists override all other rules, including AI decisions and category blocks.",
     "Quick categories are broad — selecting 'Gaming' will block all gaming-related content on the web, from YouTube to Reddit.",
+    "Need a break? Clear your prompt and uncheck all categories — Beacon will allow everything until you're ready to focus again.",
     "Tip: You can click the circles in the tutorial to skip to any tip!"
 ];
+
+// --- BRAND COLOR MAP ---
+// Top distractors get a signature premium tint.
+// USING RGBA for Dark Mode Compatibility (Auto-tints against white or black bg)
+const BRAND_COLORS = {
+    'youtube.com': { bg: 'rgba(255, 0, 0, 0.08)', border: 'rgba(255, 0, 0, 0.2)', icon: '#FF0000' }, // True Red
+    'twitch.tv': { bg: 'rgba(147, 51, 234, 0.08)', border: 'rgba(147, 51, 234, 0.2)', icon: '#9333EA' }, // Purple
+    'reddit.com': { bg: 'rgba(234, 88, 12, 0.08)', border: 'rgba(234, 88, 12, 0.2)', icon: '#EA580C' }, // Orange
+    'twitter.com': { bg: 'rgba(14, 165, 233, 0.08)', border: 'rgba(14, 165, 233, 0.2)', icon: '#0EA5E9' }, // Sky
+    'x.com': { bg: 'rgba(14, 165, 233, 0.08)', border: 'rgba(14, 165, 233, 0.2)', icon: '#0EA5E9' }, // Sky
+    'facebook.com': { bg: 'rgba(37, 99, 235, 0.08)', border: 'rgba(37, 99, 235, 0.2)', icon: '#2563EB' }, // Blue
+    'instagram.com': { bg: 'rgba(219, 39, 119, 0.08)', border: 'rgba(219, 39, 119, 0.2)', icon: '#DB2777' }, // Pink
+    'netflix.com': { bg: 'rgba(229, 9, 20, 0.08)', border: 'rgba(229, 9, 20, 0.2)', icon: '#E50914' }, // Red
+    'tiktok.com': { bg: 'rgba(5, 150, 105, 0.08)', border: 'rgba(5, 150, 105, 0.2)', icon: '#059669' }, // Green
+    'linkedin.com': { bg: 'rgba(10, 102, 194, 0.08)', border: 'rgba(10, 102, 194, 0.2)', icon: '#0A66C2' }, // Blue
+};
+
+const SYSTEM_RESET_STYLE = { bg: 'rgba(37, 99, 235, 0.1)', border: 'rgba(37, 99, 235, 0.25)' }; // Blue
+const CACHE_STYLE = { bg: 'rgba(245, 158, 11, 0.1)', border: 'rgba(245, 158, 11, 0.25)' }; // Amber
 
 // This component fetches and manages its own data
 export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUrl, initialSearchTerm = '', onHistoryCleared, onReportBug, onShareFeature }) {
@@ -42,6 +63,18 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
             setDebouncedSearchTerm(initialSearchTerm);
         }
     }, [isOpen, initialSearchTerm]);
+
+    // Lock body scroll when modal is open
+    useEffect(() => {
+        if (isOpen) {
+            document.body.style.overflow = 'hidden';
+        } else {
+            document.body.style.overflow = '';
+        }
+        return () => {
+            document.body.style.overflow = '';
+        };
+    }, [isOpen]);
 
     // --- Helper: Format Date ---
     const formatLogDate = (dateString) => {
@@ -291,13 +324,13 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                     </div>
                 </div>
 
-                <div className="modal-body" style={{ opacity: loading ? 0.6 : 1, transition: 'opacity 0.2s', minHeight: '300px', display: 'flex', flexDirection: 'column', paddingTop: '0' }}>
+                <div className="modal-body" style={{ opacity: loading ? 0.6 : 1, transition: 'opacity 0.2s', minHeight: '300px', display: 'flex', flexDirection: 'column', paddingTop: '0', overscrollBehavior: 'contain' }}>
 
                     <ul id="tour-history-view" className="log-feed-list full-history-list" style={{ flexGrow: 1 }}>
                         {logs.length === 0 && !loading ? (
                             <p style={{ textAlign: 'center', color: 'var(--text-secondary)', marginTop: '2rem' }}>No history found.</p>
                         ) : (
-                            Object.entries(groupLogsByDate(logs)).map(([groupName, groupLogs], groupIndex) => (
+                            Object.entries(groupLogsByDate(logs.slice(currentPage * LOGS_PER_PAGE, (currentPage + 1) * LOGS_PER_PAGE))).map(([groupName, groupLogs], groupIndex) => (
                                 <div key={groupName} style={{ marginBottom: '1.5rem' }}>
                                     <h3 style={{
                                         fontSize: '0.95rem',
@@ -310,15 +343,45 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                                         {groupName}
                                     </h3>
                                     {groupLogs.map((log, logIndex) => {
-                                        // All logs are now blocks (no ALLOW logs)
-                                        const isCache = log.reason && log.reason.toLowerCase().includes('cache');
+                                        // Detect Log Types
+                                        const isCache = log.reason && log.reason.toLowerCase().includes('cached decision');
+                                        const isSystemReset = log.url && log.url.includes('system-reset');
 
                                         let mainReason = log.reason || 'Blocked';
                                         let expandedReason = log.reason || 'Blocked';
 
-                                        if (isCache) {
+                                        if (isSystemReset) {
+                                            mainReason = "System Action"; // Or keep the specific string
+                                        } else if (isCache) {
                                             mainReason = "Cached decision";
                                             expandedReason = "Previously evaluated";
+                                        }
+
+                                        // Helper to get brand style
+                                        const getLogStyle = (domain) => {
+                                            // Strip subdomains loosely for matching
+                                            const baseDomain = domain.split('.').slice(-2).join('.');
+                                            // Check exact or base match
+                                            return BRAND_COLORS[domain] || BRAND_COLORS[baseDomain];
+                                        };
+
+                                        let itemStyle = {};
+                                        // 1. System Reset (Highest Priority)
+                                        if (isSystemReset) {
+                                            itemStyle = {
+                                                backgroundColor: SYSTEM_RESET_STYLE.bg,
+                                                borderColor: SYSTEM_RESET_STYLE.border,
+                                            };
+                                        }
+                                        // 2. Brand Match (if not system)
+                                        else {
+                                            const brandStyle = getLogStyle(log.domain);
+                                            if (brandStyle) {
+                                                itemStyle = {
+                                                    backgroundColor: brandStyle.bg,
+                                                    borderColor: brandStyle.border,
+                                                };
+                                            }
                                         }
 
                                         return (
@@ -327,11 +390,29 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                                                 id={groupIndex === 0 && logIndex === 0 ? 'tour-history-item-0' : undefined}
                                                 className="log-item"
                                                 onClick={() => setExpandedLogId(expandedLogId === log.id ? null : log.id)}
-                                                style={{ cursor: 'pointer', flexDirection: 'column', alignItems: 'stretch' }}
+                                                style={{
+                                                    cursor: 'pointer',
+                                                    flexDirection: 'column',
+                                                    alignItems: 'stretch',
+                                                    // Dynamic Style Injection
+                                                    ...itemStyle
+                                                }}
                                             >
                                                 <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
                                                     <div className="log-icon">
-                                                        {isCache ? (
+                                                        {isSystemReset ? (
+                                                            <div style={{
+                                                                width: '24px', height: '24px', borderRadius: '4px',
+                                                                background: '#dbeafe', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                                color: '#2563eb'
+                                                            }}>
+                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                                    <polyline points="23 4 23 10 17 10"></polyline>
+                                                                    <polyline points="1 20 1 14 7 14"></polyline>
+                                                                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                                                                </svg>
+                                                            </div>
+                                                        ) : isCache ? (
                                                             <div style={{
                                                                 width: '24px', height: '24px', borderRadius: '4px',
                                                                 background: '#fef3c7', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -370,12 +451,14 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
 
                                                 {expandedLogId === log.id && (
                                                     <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', fontSize: '0.9rem', color: 'var(--text-primary)' }}>
-                                                        <p>
-                                                            <strong>URL:</strong>{' '}
-                                                            <a href={log.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--link-color)' }}>
-                                                                {log.domain}{new URL(log.url).pathname.length > 30 ? new URL(log.url).pathname.substring(0, 30) + '...' : new URL(log.url).pathname}
-                                                            </a>
-                                                        </p>
+                                                        {!isSystemReset && (
+                                                            <p>
+                                                                <strong>URL:</strong>{' '}
+                                                                <a href={log.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--link-color)' }}>
+                                                                    {log.domain}{new URL(log.url).pathname.length > 30 ? new URL(log.url).pathname.substring(0, 30) + '...' : new URL(log.url).pathname}
+                                                                </a>
+                                                            </p>
+                                                        )}
                                                         <p><strong>Reason:</strong> {expandedReason}</p>
                                                         {log.active_prompt && (
                                                             <p><strong>Instructions:</strong> "{log.active_prompt.trim()}"</p>

@@ -6,45 +6,45 @@ const STEPS = [
     {
         target: 'tour-welcome-header',
         title: "Welcome to Beacon Blocker",
-        content: "Let's go over how your beacon will help you stay the course.\n\n(Continue with the arrow keys or by clicking the \"Next\" button.)",
+        content: "Let's go over how your beacon can help you stay the course.\n\n(Continue with the arrow keys or by clicking the \"Next\" button. You can also click the circles to skip to any tip.)",
         position: 'center',
         noSpotlight: true // Center welcome step, no spotlight needed
     },
     {
         target: 'tour-main-prompt',
         title: "Set Your Heading",
-        content: "This is your main tool for instructing your Beacon. Tell Beacon Blocker what you're up to so it can help you keep your heading. Try typing something now!",
+        content: "The glowing box is your **Beacon** — your main tool for telling Beacon Blocker how it can help you. Here, you can set your heading by writing what you're up to, and what will, or won't be, useful for your browsing session.\n\n(Try typing something now!)",
         position: 'bottom',
         highlightLogo: true // Also highlight logo during this step
     },
     {
         target: 'tour-auto-sync',
         title: "Auto Sync",
-        content: "Did you notice anything when you typed? Beacon Blocker automatically saves and syncs changes.",
+        content: "Did you notice anything when you typed? Beacon Blocker automatically saves and syncs your changes.\n\n(Orange = Syncing | Green = Synced)",
         position: 'bottom'
     },
     {
         target: 'tour-presets-section',
         title: "Presets",
-        content: "These buttons allow you to save your instructions for different types of browsing e.g. Work/School/Personal.",
+        content: "These buttons allow you to save presets for different kinds of browsing e.g. Work/School/Personal.",
         position: 'bottom'
     },
     {
         target: 'tour-update-preset-btn',
         title: "Save To Button",
-        content: "The Save To button displays your current preset. Click on it to update the name of your current preset. When you make changes to your instructions this button will turn green, inviting you to save those changes. Hit the \"X\" button to remove your current preset and reset the dashboard.",
+        content: "The **Save To** button displays your current preset (which can be clicked on, when active, to change its name). If you make any changes this button will turn green, inviting you to save those changes to your current preset. Click the **X** button to remove your current preset and reset the dashboard.",
         position: 'bottom'
     },
     {
         target: 'tour-save-preset-btn',
         title: "Save As Button",
-        content: "The Save As button creates a new preset.",
+        content: "The **Save As** button creates a new preset.",
         position: 'bottom'
     },
     {
         target: 'tour-load-preset-btn',
         title: "Load Button",
-        content: "The Load button allows you to access presets that have been previously saved. Click it to see your saved presets!",
+        content: "The **Load** button allows you to access presets that have been previously saved.",
         position: 'bottom',
         waitForClick: 'loadPreset'
     },
@@ -59,35 +59,35 @@ const STEPS = [
     {
         target: 'tour-additional-controls',
         title: "Additional Controls",
-        content: "This dropdown contains category blocks and the allow/block lists. Click on it to see what's inside.",
+        content: "This dropdown contains category blocks and the allow/block lists.",
         position: 'top',
         waitForClick: 'controls'
     },
     {
         target: 'tour-categories',
-        title: "Quick Block Categories",
-        content: "Categories are broad — they will instruct the AI to notice anything related and block it. For example, if 'Gaming' is selected, gaming-related content on YouTube will be blocked.",
+        title: "Categories",
+        content: "The categories are broad. These will instruct the AI to notice anything related to the category and block it for you e.g. Gaming related content on YouTube will be blocked if **Gaming** is selected.",
         position: 'top',
         requireOpen: 'controls'
     },
     {
         target: 'tour-lists',
-        title: "Allow & Block Lists",
-        content: "The 'Always Allow' (white) list will allow sites regardless of other rules. The 'Always Block' (black) list does the opposite. These lists override all other rules.",
+        title: "Lists",
+        content: "Entries on the **Always Allow**, or white, **List** will always be allowed, while entries on the **Always Block**, or black, **List** will always be blocked.",
         position: 'top',
         requireOpen: 'controls'
     },
     {
         target: 'tour-recent-activity',
         title: "Recent Activity",
-        content: "This shows the blocking decisions your Beacon has recently made. Click to expand it.",
+        content: "This shows the blocking decisions your **Beacon** has recently made.",
         position: 'top',
         waitForClick: 'activity'
     },
     {
         target: 'tour-recent-activity-container',
         title: "Inside: Activity Log",
-        content: "Click on any entry to see more details about why each page was blocked. If you disagree with a block, please report it and tell us why!",
+        content: "Click on any entry to see more details about why something was blocked.",
         position: 'top',
         requireOpen: 'activity'
     },
@@ -102,7 +102,7 @@ const STEPS = [
     {
         target: 'tour-full-history-modal',
         title: "Full History",
-        content: "Browse, search, and clear entries here.",
+        content: "Browse, search, or clear entries here.",
         position: 'center',
         action: 'openHistory'
     },
@@ -114,6 +114,17 @@ const STEPS = [
         arrowUp: true
     }
 ];
+
+// Helper to parse **bold** text into React elements
+function parseBold(text) {
+    const parts = text.split(/(\*\*[^*]+\*\*)/g);
+    return parts.map((part, i) => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+            return <strong key={i}>{part.slice(2, -2)}</strong>;
+        }
+        return part;
+    });
+}
 
 export default function OnboardingTour({ onClose, onOpenHistory, onCloseHistory, isHistoryModalOpen }) {
     const [stepIndex, setStepIndex] = useState(0);
@@ -128,7 +139,7 @@ export default function OnboardingTour({ onClose, onOpenHistory, onCloseHistory,
         transform: 'translateX(-50%)',
         right: 'auto',
         bottom: 'auto',
-        width: '350px',
+        width: '330px',
         zIndex: 10001,
         visibility: 'visible',
         opacity: 1
@@ -416,44 +427,61 @@ export default function OnboardingTour({ onClose, onOpenHistory, onCloseHistory,
                 resizeObserverRef.current.disconnect();
             }
             resizeObserverRef.current = new ResizeObserver(() => {
+                // Skip spotlight updates for center-positioned steps (Welcome)
+                if (step.position === 'center') {
+                    setSpotlightStyle({ display: 'none' });
+                    setSecondSpotlightStyle({ display: 'none' });
+                    return;
+                }
+
                 const newRect = targetEl.getBoundingClientRect();
 
-                // Main spotlight on target element only
-                setSpotlightStyle({
-                    display: 'block',
-                    position: 'fixed',
-                    top: newRect.top - 10,
-                    left: newRect.left - 10,
-                    width: newRect.width + 20,
-                    height: newRect.height + 20,
-                    borderRadius: '8px',
-                    boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.75)',
-                    zIndex: 10000,
-                    pointerEvents: 'none',
-                    transition: 'all 0.2s ease'
-                });
-
-                // Update second spotlight for logo if needed
+                // If highlightLogo, create combined spotlight for both logo AND prompt
                 if (step.highlightLogo) {
                     const logoEl = document.getElementById('tour-auto-sync');
-                    if (logoEl) {
+                    const promptEl = document.getElementById('tour-main-prompt');
+
+                    if (logoEl && promptEl) {
                         const logoRect = logoEl.getBoundingClientRect();
-                        setSecondSpotlightStyle({
+                        const promptRect = promptEl.getBoundingClientRect();
+
+                        const padding = 15;
+                        const combinedLeft = Math.min(logoRect.left, promptRect.left) - padding;
+                        const combinedTop = Math.min(logoRect.top, promptRect.top) - padding;
+                        const combinedRight = Math.max(logoRect.right, promptRect.right) + padding;
+                        const combinedBottom = Math.max(logoRect.bottom, promptRect.bottom) + padding;
+
+                        setSpotlightStyle({
                             display: 'block',
                             position: 'fixed',
-                            top: logoRect.top - 8,
-                            left: logoRect.left - 8,
-                            width: logoRect.width + 16,
-                            height: logoRect.height + 16,
-                            borderRadius: '8px',
-                            border: '3px solid #3b82f6',
-                            boxShadow: '0 0 20px 5px rgba(59, 130, 246, 0.6)',
-                            zIndex: 10003,
+                            top: combinedTop,
+                            left: combinedLeft,
+                            width: combinedRight - combinedLeft,
+                            height: combinedBottom - combinedTop,
+                            borderRadius: '16px',
+                            boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.75)',
+                            zIndex: 10000,
                             pointerEvents: 'none',
-                            transition: 'all 0.2s ease',
-                            background: 'transparent'
+                            transition: 'all 0.3s ease'
                         });
                     }
+                    setSecondSpotlightStyle({ display: 'none' });
+                } else {
+                    // Main spotlight on target element only
+                    setSpotlightStyle({
+                        display: 'block',
+                        position: 'fixed',
+                        top: newRect.top - 10,
+                        left: newRect.left - 10,
+                        width: newRect.width + 20,
+                        height: newRect.height + 20,
+                        borderRadius: '8px',
+                        boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.75)',
+                        zIndex: 10000,
+                        pointerEvents: 'none',
+                        transition: 'all 0.2s ease'
+                    });
+                    setSecondSpotlightStyle({ display: 'none' });
                 }
             });
             resizeObserverRef.current.observe(targetEl);
@@ -483,27 +511,39 @@ export default function OnboardingTour({ onClose, onOpenHistory, onCloseHistory,
                 transition: 'all 0.2s ease'
             });
 
-            // If highlightLogo, add second spotlight for logo (with glowing border instead of cutout)
+            // If highlightLogo, create ONE combined spotlight for both logo AND prompt box
             if (step.highlightLogo) {
                 const logoEl = document.getElementById('tour-auto-sync');
-                if (logoEl) {
+                const promptEl = document.getElementById('tour-main-prompt');
+
+                if (logoEl && promptEl) {
                     const logoRect = logoEl.getBoundingClientRect();
-                    setSecondSpotlightStyle({
+                    const promptRect = promptEl.getBoundingClientRect();
+
+                    // Calculate bounding box that encompasses both elements
+                    const padding = 15;
+                    const combinedLeft = Math.min(logoRect.left, promptRect.left) - padding;
+                    const combinedTop = Math.min(logoRect.top, promptRect.top) - padding;
+                    const combinedRight = Math.max(logoRect.right, promptRect.right) + padding;
+                    const combinedBottom = Math.max(logoRect.bottom, promptRect.bottom) + padding;
+
+                    // Override the main spotlight with the combined area
+                    setSpotlightStyle({
                         display: 'block',
                         position: 'fixed',
-                        top: logoRect.top - 8,
-                        left: logoRect.left - 8,
-                        width: logoRect.width + 16,
-                        height: logoRect.height + 16,
-                        borderRadius: '8px',
-                        border: '3px solid #3b82f6',
-                        boxShadow: '0 0 20px 5px rgba(59, 130, 246, 0.6)',
-                        zIndex: 10003,
+                        top: combinedTop,
+                        left: combinedLeft,
+                        width: combinedRight - combinedLeft,
+                        height: combinedBottom - combinedTop,
+                        borderRadius: '16px',
+                        boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.75)',
+                        zIndex: 10000,
                         pointerEvents: 'none',
-                        transition: 'all 0.2s ease',
-                        background: 'transparent'
+                        transition: 'all 0.3s ease'
                     });
                 }
+                // Don't show secondary spotlight - we're using combined
+                setSecondSpotlightStyle({ display: 'none' });
             } else {
                 setSecondSpotlightStyle({ display: 'none' });
             }
@@ -515,8 +555,9 @@ export default function OnboardingTour({ onClose, onOpenHistory, onCloseHistory,
         const tooltipHeight = 220; // Approximate height of tooltip
 
         if (step.position === 'center') {
-            // Centered for welcome step only - hide spotlight too
+            // Centered for welcome step only - hide ALL spotlights
             setSpotlightStyle({ display: 'none' });
+            setSecondSpotlightStyle({ display: 'none' });
             setTooltipStyle({
                 position: 'fixed',
                 top: '35%',
@@ -719,7 +760,16 @@ export default function OnboardingTour({ onClose, onOpenHistory, onCloseHistory,
                     <button className="tour-close" onClick={handleDismiss}>&times;</button>
                 </div>
                 <div className="tour-body">
-                    <p>{currentStep.content}</p>
+                    {currentStep.content.includes('\n\n(') ? (
+                        <>
+                            <p>{parseBold(currentStep.content.split('\n\n(')[0])}</p>
+                            <p className="tour-hint">
+                                ({currentStep.content.split('\n\n(')[1]}
+                            </p>
+                        </>
+                    ) : (
+                        <p>{parseBold(currentStep.content)}</p>
+                    )}
                 </div>
                 <div className="tour-footer">
                     <div className="tour-dots">

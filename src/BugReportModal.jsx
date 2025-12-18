@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
+import config from './config.js';
 
 export default function BugReportModal({ isOpen, onClose, userId, userEmail }) {
-    console.log("DEBUG: BugReportModal Props:", { userId, userEmail });
     const [description, setDescription] = useState('');
     const [steps, setSteps] = useState('');
     const [manualEmail, setManualEmail] = useState('');
@@ -132,7 +132,7 @@ export default function BugReportModal({ isOpen, onClose, userId, userEmail }) {
                 headers['Authorization'] = `Bearer ${token}`;
             }
 
-            const response = await fetch('http://localhost:3000/report-bug', {
+            const response = await fetch(config.BACKEND_URL + '/report-bug', {
                 method: 'POST',
                 headers: headers,
                 body: JSON.stringify(reportData)

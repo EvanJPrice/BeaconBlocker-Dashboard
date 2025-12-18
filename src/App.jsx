@@ -8,6 +8,7 @@ import BugReportModal from './BugReportModal.jsx'; // Import BugReportModal
 import FeatureRequestModal from './FeatureRequestModal.jsx'; // Import FeatureRequestModal
 import UnloadPresetModal from './UnloadPresetModal';
 import DeleteAccountModal from './DeleteAccountModal';
+import config from './config.js'; // Environment config
 import { encryptPrompt, decryptPrompt } from './cryptoUtils.js'; // Prompt encryption for privacy
 
 import ProfileDropdown from './ProfileDropdown';
@@ -39,7 +40,6 @@ function getBaseDomain(urlString) {
         }
         return url.hostname.toLowerCase();
     } catch (e) {
-        console.warn("Could not parse domain:", urlString);
         return null;
     }
 }
@@ -63,7 +63,6 @@ async function fetchBlockLogsFromExtension() {
             resolved = true;
             clearTimeout(timeoutId); // Cancel the timeout
             window.removeEventListener('BEACON_BLOCK_LOG_RESPONSE', handleResponse);
-            // console.log('Dashboard: Received block log response', event.detail?.logs?.length || 0, 'entries');
             resolve(event.detail?.logs || []);
         };
 
@@ -71,7 +70,6 @@ async function fetchBlockLogsFromExtension() {
         window.addEventListener('BEACON_BLOCK_LOG_RESPONSE', handleResponse);
 
         // Request block logs via CustomEvent (content script bridges to background)
-        // console.log('Dashboard: Requesting block logs from extension');
         document.dispatchEvent(new CustomEvent('BEACON_GET_BLOCK_LOG'));
 
         // Timeout after 2 seconds if no response
@@ -79,7 +77,6 @@ async function fetchBlockLogsFromExtension() {
             if (resolved) return; // Already resolved
             resolved = true;
             window.removeEventListener('BEACON_BLOCK_LOG_RESPONSE', handleResponse);
-            // console.log('Dashboard: Block log request timed out');
             resolve([]);
         }, 2000);
     });
@@ -131,7 +128,7 @@ const commonSiteMappings = {
 };
 
 // === Dashboard Component ===
-function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearch, theme, onThemeChange, extensionStatus }) {
+function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearch, theme, onThemeChange, extensionStatus, onRestartTour }) {
     const [loading, setLoading] = useState(true);
     const [message, setMessage] = useState(null);
     const [apiKey, setApiKey] = useState(null);
@@ -224,6 +221,7 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
     const [charIndex, setCharIndex] = useState(0);
     const [isDeleting, setIsDeleting] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
+
 
 
 
@@ -466,16 +464,16 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
             try {
                 const authToken = (await supabase.auth.getSession()).data.session?.access_token;
                 if (authToken) {
-                    fetch('http://localhost:3000/update-rules-signal', {
+                    fetch(config.BACKEND_URL + '/update-rules-signal', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
                             'Authorization': `Bearer ${authToken}`
                         }
-                    }).catch(err => console.log('Cache invalidation signal skipped:', err.message));
+                    }).catch(() => { }); // Fire and forget
                 }
             } catch (e) {
-                console.log('Cache invalidation signal skipped:', e.message);
+                // Ignore cache version errors
             }
         }
     };
@@ -570,7 +568,6 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
             console.error('Error saving preset:', error);
             alert('Failed to save preset.');
         } else {
-            console.log('Preset saved:', data);
             await fetchPresets(); // Refresh list
             setIsSavingPreset(false);
             setNewPresetName('');
@@ -619,7 +616,6 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
 
         // 1. Check for Duplicate Name first
         const duplicateName = presets.find(p => p.name.toLowerCase() === name.toLowerCase());
-        console.log('Checking for duplicate name:', name, 'Found:', duplicateName?.name);
         if (duplicateName) {
             setOverwriteCandidate(duplicateName);
             return;
@@ -633,8 +629,6 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
             block_list: blockListArray
         };
 
-        console.log('Checking for duplicate content. Current prompt:', mainPrompt?.substring(0, 50));
-        console.log('Presets count:', presets.length);
 
         const duplicateContent = presets.find(p => {
             const isMatch = areSettingsEqual({
@@ -643,7 +637,6 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                 allow_list: p.allow_list,
                 block_list: p.block_list
             }, currentSettings);
-            console.log('Comparing with preset:', p.name, '- Match:', isMatch);
             return isMatch;
         });
 
@@ -710,7 +703,6 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
     };
 
     const handleUpdateActivePreset = async () => {
-        console.log('Updating active preset:', activePreset);
         if (!activePreset || !activePreset.id) {
             console.error('No active preset or missing ID');
             alert('Error: Active preset is missing ID. Please reload the preset.');
@@ -757,7 +749,6 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
             console.error('Error updating preset:', error);
             alert(`Failed to update preset: ${error.message}`);
         } else {
-            console.log('Preset updated successfully');
             await fetchPresets(); // Refresh list to reflect changes
 
             // Update checkpoint
@@ -801,7 +792,6 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
         setAllowListArray(preset.allow_list || []);
         setBlockListArray(preset.block_list || []);
 
-        console.log('Setting active preset:', { id: preset.id, name: preset.name });
         setActivePreset({ id: preset.id, name: preset.name });
 
         // Use decrypted prompt for comparison so isPresetModified works correctly
@@ -883,7 +873,6 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
     const handleDeletePreset = async (id) => {
         // If deleting the currently active preset, unload and RESET dashboard
         if (activePreset && activePreset.id === id) {
-            console.log("Deleting active preset - performing full dashboard reset");
             setActivePreset(null);
             setPresetOriginalState(null);
 
@@ -963,6 +952,31 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
 
     }, [session]);
 
+    // --- Extension Bridge Listeners ---
+    useEffect(() => {
+        // Refresh logs when the extension announces an update (e.g. cache clear)
+        const handleLogUpdate = () => {
+            console.log('[BRIDGE] Log update announced by extension');
+            fetchLogs();
+        };
+
+        // Sync theme if changed from popup or another tab
+        const handleThemeUpdate = (event) => {
+            if (event.detail?.theme && event.detail.theme !== theme) {
+                console.log('[BRIDGE] Theme update announced by extension:', event.detail.theme);
+                setTheme(event.detail.theme);
+            }
+        };
+
+        window.addEventListener('BEACON_BLOCK_LOG_UPDATED', handleLogUpdate);
+        window.addEventListener('BEACON_THEME_UPDATED', handleThemeUpdate);
+
+        return () => {
+            window.removeEventListener('BEACON_BLOCK_LOG_UPDATED', handleLogUpdate);
+            window.removeEventListener('BEACON_THEME_UPDATED', handleThemeUpdate);
+        };
+    }, [theme]); // Re-subscribe when theme changes to ensure handler has latest theme value
+
     const [inputError, setInputError] = useState({ type: null, msg: null }); // New error state
     const [clearConfirmation, setClearConfirmation] = useState(null); // 'allow' or 'block'
     const [showLogs, setShowLogs] = useState(() => localStorage.getItem('beacon_showLogs') === 'true'); // Collapsible logs state
@@ -991,17 +1005,14 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
     const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
     const handleDeleteAccount = async () => {
-        console.log("DEBUG: Starting Account Deletion...");
         setIsDeletingAccount(true);
         try {
             const { data: { session } } = await supabase.auth.getSession();
             const token = session?.access_token;
-            console.log("DEBUG: Session Token present:", !!token);
 
             if (!token) throw new Error("No active session");
 
-            console.log("DEBUG: Sending request to http://localhost:3000/delete-account");
-            const response = await fetch('http://localhost:3000/delete-account', {
+            const response = await fetch(config.BACKEND_URL + '/delete-account', {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -1009,7 +1020,6 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                 }
             });
 
-            console.log("DEBUG: Response Status:", response.status);
 
             if (!response.ok) {
                 const errorData = await response.json();
@@ -1018,7 +1028,6 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
             }
 
             // Success
-            console.log("DEBUG: Deletion successful. Signing out...");
             await supabase.auth.signOut();
             window.location.reload();
 
@@ -1042,10 +1051,8 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
     // --- Handle checkbox changes (Auto-save) ---
     const handleCategoryChange = (event) => {
         const { name, checked } = event.target;
-        console.log(`DEBUG: Checkbox Changed: ${name} = ${checked}`);
 
         const newCategories = { ...blockedCategories, [name]: checked };
-        console.log("DEBUG: New Categories State:", newCategories);
 
         setBlockedCategories(newCategories);
         setSaveStatus('saving'); // Immediate "Listening" feedback
@@ -1072,6 +1079,10 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
 
         if (domain) {
             if (listType === 'allow') {
+                if (blockListArray.includes(domain)) {
+                    setInputError({ type: 'allow', msg: `${domain} is already in your Block list.` });
+                    return;
+                }
                 if (!allowListArray.includes(domain)) {
                     const newList = [...allowListArray, domain].sort();
                     setAllowListArray(newList);
@@ -1081,6 +1092,10 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                     setCurrentAllowInput('');
                 }
             } else {
+                if (allowListArray.includes(domain)) {
+                    setInputError({ type: 'block', msg: `${domain} is already in your Allow list.` });
+                    return;
+                }
                 if (!blockListArray.includes(domain)) {
                     const newList = [...blockListArray, domain].sort();
                     setBlockListArray(newList);
@@ -1090,7 +1105,8 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                     setCurrentBlockInput('');
                 }
             }
-        } else {
+        }
+        else {
             setInputError({ type: listType, msg: `Invalid domain. Try 'example.com'.` });
         }
     };
@@ -1272,10 +1288,7 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                     <button
-                        onClick={() => {
-                            localStorage.removeItem('hasSeenOnboarding');
-                            window.location.reload();
-                        }}
+                        onClick={onRestartTour}
                         className="help-button"
                         title="Restart Onboarding Tour"
                     >
@@ -1732,27 +1745,63 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                                 <ul className="log-feed-list">
                                     {logs.slice(0, 5).map((log, index) => {
                                         // All logs are now blocks (no ALLOW logs)
-                                        const isCache = log.reason && log.reason.toLowerCase().includes('cache');
+                                        const isCache = log.reason && log.reason.toLowerCase().includes('cached decision');
+                                        const isSystemReset = log.url && log.url.includes('system-reset');
 
                                         // Reason text logic
                                         let mainReason = log.reason || 'Blocked';
                                         let expandedReason = log.reason || 'Blocked';
 
-                                        if (isCache) {
+                                        if (isSystemReset) {
+                                            mainReason = "System Action";
+                                        } else if (isCache) {
                                             mainReason = "Cached decision";
                                             expandedReason = "Previously evaluated";
                                         }
+                                        // Helper to get brand style
+                                        const getLogStyle = (domain) => {
+                                            const baseDomain = domain.split('.').slice(-2).join('.');
+                                            return BRAND_COLORS[domain] || BRAND_COLORS[baseDomain];
+                                        };
+
+                                        let itemStyle = {};
+                                        if (isSystemReset) {
+                                            itemStyle = { backgroundColor: SYSTEM_RESET_STYLE.bg, borderColor: SYSTEM_RESET_STYLE.border };
+                                        } else {
+                                            const brandStyle = getLogStyle(log.domain);
+                                            if (brandStyle) {
+                                                itemStyle = { backgroundColor: brandStyle.bg, borderColor: brandStyle.border };
+                                            }
+                                        }
+
                                         return (
                                             <li
                                                 key={log.id}
                                                 id={index === 0 ? 'tour-recent-activity-item-0' : undefined}
                                                 className="log-item"
                                                 onClick={() => setExpandedLogId(expandedLogId === log.id ? null : log.id)}
-                                                style={{ cursor: 'pointer', flexDirection: 'column', alignItems: 'stretch' }}
+                                                style={{
+                                                    cursor: 'pointer',
+                                                    flexDirection: 'column',
+                                                    alignItems: 'stretch',
+                                                    ...itemStyle
+                                                }}
                                             >
                                                 <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
                                                     <div className="log-icon">
-                                                        {isCache ? (
+                                                        {isSystemReset ? (
+                                                            <div style={{
+                                                                width: '24px', height: '24px', borderRadius: '4px',
+                                                                background: '#dbeafe', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                                color: '#2563eb'
+                                                            }}>
+                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                                    <polyline points="23 4 23 10 17 10"></polyline>
+                                                                    <polyline points="1 20 1 14 7 14"></polyline>
+                                                                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                                                                </svg>
+                                                            </div>
+                                                        ) : isCache ? (
                                                             <div style={{
                                                                 width: '24px', height: '24px', borderRadius: '4px',
                                                                 background: '#fef3c7', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -1799,7 +1848,9 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
 
                                                 {expandedLogId === log.id && (
                                                     <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', fontSize: '0.9rem', color: 'var(--text-primary)' }}>
-                                                        <p style={{ display: 'flex', alignItems: 'baseline', gap: '0.25rem' }}><strong>URL:</strong> <a href={log.url} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '400px', display: 'inline-block' }}>{log.url}</a></p>
+                                                        {!isSystemReset && (
+                                                            <p style={{ display: 'flex', alignItems: 'baseline', gap: '0.25rem' }}><strong>URL:</strong> <a href={log.url} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '400px', display: 'inline-block' }}>{log.url}</a></p>
+                                                        )}
                                                         <p><strong>Reason:</strong> {expandedReason}</p>
                                                         {log.active_prompt && (
                                                             <p><strong>Instructions:</strong> "{log.active_prompt}"</p>
@@ -1936,16 +1987,14 @@ function AuthForm({ supabase }) {
 
         if (isLogin) {
             // Login Logic
-            console.log("DEBUG: Attempting Login", { email, passwordLength: password.length });
             const { error } = await supabase.auth.signInWithPassword({
                 email,
                 password,
             });
             if (error) {
-                console.log("DEBUG: Login Error:", error.message);
                 // Check if user exists to give better error
                 try {
-                    const checkRes = await fetch('http://localhost:3000/check-email', {
+                    const checkRes = await fetch(config.BACKEND_URL + '/check-email', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ email })
@@ -2195,6 +2244,23 @@ const areSettingsEqual = (config1, config2) => {
     return true;
 };
 
+// --- BRAND COLOR MAP ---
+// Top distractors get a signature premium tint.
+// USING RGBA for Dark Mode Compatibility (Auto-tints against white or black bg)
+const BRAND_COLORS = {
+    'youtube.com': { bg: 'rgba(255, 0, 0, 0.08)', border: 'rgba(255, 0, 0, 0.2)', icon: '#FF0000' }, // True Red
+    'twitch.tv': { bg: 'rgba(147, 51, 234, 0.08)', border: 'rgba(147, 51, 234, 0.2)', icon: '#9333EA' }, // Purple
+    'reddit.com': { bg: 'rgba(234, 88, 12, 0.08)', border: 'rgba(234, 88, 12, 0.2)', icon: '#EA580C' }, // Orange
+    'twitter.com': { bg: 'rgba(14, 165, 233, 0.08)', border: 'rgba(14, 165, 233, 0.2)', icon: '#0EA5E9' }, // Sky
+    'x.com': { bg: 'rgba(14, 165, 233, 0.08)', border: 'rgba(14, 165, 233, 0.2)', icon: '#0EA5E9' }, // Sky
+    'facebook.com': { bg: 'rgba(37, 99, 235, 0.08)', border: 'rgba(37, 99, 235, 0.2)', icon: '#2563EB' }, // Blue
+    'instagram.com': { bg: 'rgba(219, 39, 119, 0.08)', border: 'rgba(219, 39, 119, 0.2)', icon: '#DB2777' }, // Pink
+    'netflix.com': { bg: 'rgba(229, 9, 20, 0.08)', border: 'rgba(229, 9, 20, 0.2)', icon: '#E50914' }, // Red
+    'tiktok.com': { bg: 'rgba(5, 150, 105, 0.08)', border: 'rgba(5, 150, 105, 0.2)', icon: '#059669' }, // Green
+    'linkedin.com': { bg: 'rgba(10, 102, 194, 0.08)', border: 'rgba(10, 102, 194, 0.2)', icon: '#0A66C2' }, // Blue
+};
+const SYSTEM_RESET_STYLE = { bg: 'rgba(37, 99, 235, 0.1)', border: 'rgba(37, 99, 235, 0.25)' }; // Blue
+
 export default function App() {
     const [session, setSession] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -2206,6 +2272,14 @@ export default function App() {
     const [initialSearchTerm, setInitialSearchTerm] = useState('');
 
     const [dashboardKey, setDashboardKey] = useState(0); // Key to force Dashboard refresh
+
+    // --- Onboarding Restart State ---
+    const [tourRestartKey, setTourRestartKey] = useState(0);
+
+    const handleRestartTour = () => {
+        localStorage.removeItem('hasSeenOnboarding');
+        setTourRestartKey(prev => prev + 1);
+    };
 
     // Handler to open history modal with a pre-filled search term
     const handleOpenHistoryWithSearch = (searchTerm) => {
@@ -2264,10 +2338,14 @@ export default function App() {
         applyTheme(theme);
         localStorage.setItem('beacon_theme', theme);
 
-        // Sync theme to extension
-        console.log("App.jsx: Dispatching BEACON_THEME_SYNC", theme);
+        // Sync theme to extension - send the RESOLVED theme, not 'system'
+        // This ensures the extension popup matches the dashboard's current visual state
+        let resolvedTheme = theme;
+        if (theme === 'system') {
+            resolvedTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
         document.dispatchEvent(new CustomEvent('BEACON_THEME_SYNC', {
-            detail: { theme }
+            detail: { theme: resolvedTheme }
         }));
 
         // Listen for system changes if in system mode
@@ -2299,7 +2377,6 @@ export default function App() {
 
         // Handle Logout
         if (params.get('logout') === 'true') {
-            console.log("Logout param detected. Signing out...");
             supabase.auth.signOut().then(() => {
                 // Clean URL
                 window.history.replaceState({}, document.title, window.location.pathname);
@@ -2310,7 +2387,6 @@ export default function App() {
     // --- Helper: Sync Auth to Extension ---
     const syncAuthToExtension = (session) => {
         if (session?.access_token && session?.user?.email) {
-            console.log("Dispatching BEACON_AUTH_SYNC event...", session.user.email);
             document.dispatchEvent(new CustomEvent('BEACON_AUTH_SYNC', {
                 detail: {
                     token: session.access_token,
@@ -2337,7 +2413,6 @@ export default function App() {
                 syncAuthToExtension(session); // Sync on change
             } else {
                 // Dispatch Logout Event to Extension
-                console.log("Dispatching BEACON_AUTH_LOGOUT event...");
                 document.dispatchEvent(new CustomEvent('BEACON_AUTH_LOGOUT'));
             }
         });
@@ -2348,19 +2423,16 @@ export default function App() {
     // --- Retry Sync when Extension is Detected ---
     useEffect(() => {
         if (session && (extensionStatus === 'active' || extensionStatus === 'logged_out')) {
-            console.log("Extension detected (Status: " + extensionStatus + "). Syncing auth...");
             syncAuthToExtension(session);
         }
     }, [extensionStatus, session]);
 
     // --- Handlers ---
     const handleOpenHistory = useCallback(() => {
-        console.log("Opening History Modal");
         setIsHistoryModalOpen(true);
     }, []);
 
     const handleHistoryCleared = useCallback(() => {
-        console.log("History cleared! Refreshing Dashboard...");
         setDashboardKey(prev => prev + 1);
     }, []);
 
@@ -2415,11 +2487,14 @@ export default function App() {
                         theme={theme}
                         onThemeChange={setTheme}
                         extensionStatus={extensionStatus}
+                        onRestartTour={handleRestartTour}
                     />
                     <OnboardingTour
+                        key={tourRestartKey}
                         onOpenHistory={() => setIsHistoryModalOpen(true)}
                         onCloseHistory={() => setIsHistoryModalOpen(false)}
                         isHistoryModalOpen={isHistoryModalOpen}
+                        onClose={() => { }} // Simple placeholder for now
                     />
                 </div>
             )}
@@ -2445,7 +2520,6 @@ export default function App() {
                 userId={session?.user?.id}
                 userEmail={session?.user?.email}
             />
-            {console.log("DEBUG: App.jsx Session:", session)}
         </>
     );
 }

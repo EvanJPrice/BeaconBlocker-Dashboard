@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
+import config from './config.js';
 
 export default function FeatureRequestModal({ isOpen, onClose, userId, userEmail }) {
     const [idea, setIdea] = useState('');
@@ -18,21 +19,18 @@ export default function FeatureRequestModal({ isOpen, onClose, userId, userEmail
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        console.log('Feature submit clicked, idea:', idea);
         if (!idea.trim()) {
             alert('Please describe your feature idea.');
             return;
         }
 
         setLoading(true);
-        console.log('Submitting feature idea...');
 
         try {
             const timestamp = new Date().toISOString();
 
             // 1. Save to DB (using bug_reports table with type field)
             const { data: { session } } = await supabase.auth.getSession();
-            console.log('Session:', session ? 'Found' : 'None');
 
             const authHeader = session?.access_token
                 ? { 'Authorization': `Bearer ${session.access_token}` }
@@ -47,17 +45,14 @@ export default function FeatureRequestModal({ isOpen, onClose, userId, userEmail
                 timestamp,
                 recipient: 'ej3price@gmail.com'
             };
-            console.log('Sending payload:', payload);
 
-            const response = await fetch('http://localhost:3000/report-bug', {
+            const response = await fetch(config.BACKEND_URL + '/report-bug', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', ...authHeader },
                 body: JSON.stringify(payload)
             });
 
-            console.log('Response status:', response.status);
             const responseData = await response.json();
-            console.log('Response data:', responseData);
 
             if (!response.ok) throw new Error('Failed to send feature idea');
 
