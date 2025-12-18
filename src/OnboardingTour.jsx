@@ -13,7 +13,7 @@ const STEPS = [
     {
         target: 'tour-main-prompt',
         title: "Set Your Heading",
-        content: "The glowing box is your **Beacon** — your main tool for telling Beacon Blocker how it can help you. Here, you can set your heading by writing what you're up to, and what will, or won't be, useful for your browsing session.\n\n(Try typing something now!)",
+        content: "The glowing box is your **Beacon** — your main tool for telling Beacon Blocker how it can help you. Here, you can 'set your heading' by writing what you're up to, and what will, or won't be, useful for your browsing session.\n\n(Try typing something now!)",
         position: 'bottom',
         highlightLogo: true // Also highlight logo during this step
     },
@@ -26,13 +26,13 @@ const STEPS = [
     {
         target: 'tour-presets-section',
         title: "Presets",
-        content: "These buttons allow you to save presets for different kinds of browsing e.g. Work/School/Personal.",
+        content: "These buttons allow you to save presets for different kinds of browsing \n\ne.g. Work/School/Personal.",
         position: 'bottom'
     },
     {
         target: 'tour-update-preset-btn',
         title: "Save To Button",
-        content: "The **Save To** button displays your current preset (which can be clicked on, when active, to change its name). If you make any changes this button will turn green, inviting you to save those changes to your current preset. Click the **X** button to remove your current preset and reset the dashboard.",
+        content: "The **Save To** button displays your current preset (which can be clicked on, when active, to change its name). If you make any changes this button will turn green, click it to save your changes. Click the **X** button to remove your current preset and reset the dashboard.",
         position: 'bottom'
     },
     {
@@ -66,7 +66,7 @@ const STEPS = [
     {
         target: 'tour-categories',
         title: "Categories",
-        content: "The categories are broad. These will instruct the AI to notice anything related to the category and block it for you e.g. Gaming related content on YouTube will be blocked if **Gaming** is selected.",
+        content: "The **Quick Block Categories** are broad. These will instruct the AI to notice anything related to the category and block it for you \n\ne.g. Gaming related content on YouTube will be blocked if **Gaming** is selected.",
         position: 'top',
         requireOpen: 'controls'
     },
