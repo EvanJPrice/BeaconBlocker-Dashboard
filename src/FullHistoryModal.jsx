@@ -513,11 +513,11 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                                                                     const timestamp = parseInt(log.id.split('-')[1]);
                                                                     handleDeleteLog(log.id, timestamp);
                                                                 }}
-                                                                style={{
-                                                                    color: deleteConfirmId === log.id ? '#fff' : '#ef4444',
-                                                                    borderColor: deleteConfirmId === log.id ? '#dc2626' : '#fecaca',
-                                                                    backgroundColor: deleteConfirmId === log.id ? '#dc2626' : 'transparent'
-                                                                }}
+                                                                style={deleteConfirmId === log.id ? {
+                                                                    color: '#fff',
+                                                                    borderColor: '#dc2626',
+                                                                    backgroundColor: '#dc2626'
+                                                                } : {}}
                                                             >
                                                                 {deleteConfirmId === log.id ? 'Confirm Delete?' : 'Delete Entry'}
                                                             </button>

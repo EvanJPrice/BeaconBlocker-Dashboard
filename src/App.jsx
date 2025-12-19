@@ -1904,11 +1904,11 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                                                                     const timestamp = parseInt(log.id.split('-')[1]);
                                                                     handleDeleteFromRecent(log.id, timestamp);
                                                                 }}
-                                                                style={{
-                                                                    color: logDeleteConfirmId === log.id ? '#fff' : '#ef4444',
-                                                                    borderColor: logDeleteConfirmId === log.id ? '#dc2626' : '#fecaca',
-                                                                    backgroundColor: logDeleteConfirmId === log.id ? '#dc2626' : 'transparent'
-                                                                }}
+                                                                style={logDeleteConfirmId === log.id ? {
+                                                                    color: '#fff',
+                                                                    borderColor: '#dc2626',
+                                                                    backgroundColor: '#dc2626'
+                                                                } : {}}
                                                             >
                                                                 {logDeleteConfirmId === log.id ? 'Confirm Delete?' : 'Delete Entry'}
                                                             </button>
