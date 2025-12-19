@@ -984,7 +984,24 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
     useEffect(() => { localStorage.setItem('beacon_showLogs', showLogs); }, [showLogs]);
 
     const [expandedLogId, setExpandedLogId] = useState(null); // Click to expand log details
+    const [logDeleteConfirmId, setLogDeleteConfirmId] = useState(null); // Delete confirmation for individual logs
     const [signOutConfirmation, setSignOutConfirmation] = useState(false); // Sign out confirmation
+
+    // --- Delete Single Log from Recent Activity ---
+    const handleDeleteFromRecent = (logId, timestamp) => {
+        if (logDeleteConfirmId === logId) {
+            // Second click - actually delete
+            document.dispatchEvent(new CustomEvent('BEACON_DELETE_SINGLE_LOG', {
+                detail: { timestamp }
+            }));
+            setLogs(logs.filter(l => l.id !== logId));
+            setLogDeleteConfirmId(null);
+        } else {
+            // First click - show confirmation
+            setLogDeleteConfirmId(logId);
+            setTimeout(() => setLogDeleteConfirmId(null), 3000);
+        }
+    };
 
     // Local getFaviconUrl removed (moved to top level)
 
@@ -1880,6 +1897,21 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                                                                     View all with this prompt
                                                                 </button>
                                                             )}
+                                                            <button
+                                                                className="history-link-button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    const timestamp = parseInt(log.id.split('-')[1]);
+                                                                    handleDeleteFromRecent(log.id, timestamp);
+                                                                }}
+                                                                style={{
+                                                                    color: logDeleteConfirmId === log.id ? '#fff' : '#ef4444',
+                                                                    borderColor: logDeleteConfirmId === log.id ? '#dc2626' : '#fecaca',
+                                                                    backgroundColor: logDeleteConfirmId === log.id ? '#dc2626' : 'transparent'
+                                                                }}
+                                                            >
+                                                                {logDeleteConfirmId === log.id ? 'Confirm Delete?' : 'Delete Entry'}
+                                                            </button>
                                                         </div>
                                                     </div>
                                                 )}
