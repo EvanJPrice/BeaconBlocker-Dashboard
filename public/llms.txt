@@ -1,0 +1,16 @@
+# Beacon Blocker Dashboard
+
+> Web dashboard to manage your Beacon Blocker extension settings.
+
+## Purpose
+The Dashboard allows users to configure their AI-powered content blocker, manage blocking rule presets, and review their browsing activity history.
+
+## Features
+- Custom blocking rules editor
+- Save/Load preset profiles
+- Activity log with AI reasoning
+- Dark/Light theme support
+
+## Links
+- Main Website: https://beaconblocker.com
+- Dashboard: https://beaconblocker.vercel.app

@@ -1738,7 +1738,7 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                             <div className="empty-logs" id="tour-recent-activity-item-0">
                                 <span style={{ fontSize: '2rem', marginBottom: '0.5rem', display: 'block' }}>🌊</span>
                                 <p>No activity recorded yet.</p>
-                                <small>Browse the web to see Beacon in action.</small>
+                                <small>Browse the web to see your Beacon in action.</small>
                             </div>
                         ) : (
                             <>

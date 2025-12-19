@@ -67,7 +67,7 @@ function PresetsModal({ isOpen, onClose, presets, activePresetId, onLoad, onRena
                     {safePresets.length === 0 ? (
                         <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
                             <p>No presets saved yet.</p>
-                            <p style={{ fontSize: '0.9rem', marginTop: '0.5rem' }}>Configure your settings and click "Save Preset" to create one.</p>
+                            <p style={{ fontSize: '0.9rem', marginTop: '0.5rem' }}>Configure your settings and click "Save As" to create one.</p>
                         </div>
                     ) : (
                         <ul className="log-feed-list">
