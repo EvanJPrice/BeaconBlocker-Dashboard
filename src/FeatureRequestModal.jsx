@@ -43,7 +43,7 @@ export default function FeatureRequestModal({ isOpen, onClose, userId, userEmail
                 user_id: userId,
                 user_email: manualEmail,
                 timestamp,
-                recipient: 'ej3price@gmail.com'
+                recipient: 'beaconblocker.dev@gmail.com'
             };
 
             const response = await fetch(config.BACKEND_URL + '/report-bug', {

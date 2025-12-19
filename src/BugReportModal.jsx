@@ -118,7 +118,7 @@ export default function BugReportModal({ isOpen, onClose, userId, userEmail }) {
                 user_email: manualEmail,
                 screenshot_url: screenshotUrl,
                 timestamp: new Date().toISOString(),
-                recipient: 'ej3price@gmail.com'
+                recipient: 'beaconblocker.dev@gmail.com'
             };
 
             // Send to backend
