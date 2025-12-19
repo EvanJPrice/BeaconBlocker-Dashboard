@@ -195,6 +195,24 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
     }, [isOpen, userId, debouncedSearchTerm]);
 
     const [showClearConfirm, setShowClearConfirm] = useState(false);
+    const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+
+    // --- Delete Single Log Entry ---
+    const handleDeleteLog = (logId, timestamp) => {
+        if (deleteConfirmId === logId) {
+            // Second click - actually delete
+            document.dispatchEvent(new CustomEvent('BEACON_DELETE_SINGLE_LOG', {
+                detail: { timestamp }
+            }));
+            setLogs(logs.filter(l => l.id !== logId));
+            setTotalLogs(prev => prev - 1);
+            setDeleteConfirmId(null);
+        } else {
+            // First click - show confirmation
+            setDeleteConfirmId(logId);
+            setTimeout(() => setDeleteConfirmId(null), 3000);
+        }
+    };
 
     // --- Clear History (Local Extension Storage + Cache) ---
     const handleClearHistory = async () => {
@@ -487,6 +505,22 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                                                                     View all with this prompt
                                                                 </button>
                                                             )}
+                                                            <button
+                                                                className="history-link-button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    // Extract timestamp from log id (format: local-TIMESTAMP-INDEX)
+                                                                    const timestamp = parseInt(log.id.split('-')[1]);
+                                                                    handleDeleteLog(log.id, timestamp);
+                                                                }}
+                                                                style={{
+                                                                    color: deleteConfirmId === log.id ? '#fff' : '#ef4444',
+                                                                    borderColor: deleteConfirmId === log.id ? '#dc2626' : '#fecaca',
+                                                                    backgroundColor: deleteConfirmId === log.id ? '#dc2626' : 'transparent'
+                                                                }}
+                                                            >
+                                                                {deleteConfirmId === log.id ? 'Confirm Delete?' : 'Delete Entry'}
+                                                            </button>
                                                         </div>
                                                     </div>
                                                 )}
