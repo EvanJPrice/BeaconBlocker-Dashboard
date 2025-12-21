@@ -14,6 +14,7 @@ const TIPS = [
     "The 'Always Allow' and 'Always Block' lists override all other rules, including AI decisions and category blocks.",
     "Quick categories are broad — selecting 'Gaming' will block all gaming-related content on the web, from YouTube to Reddit.",
     "Need a break? Clear your prompt and uncheck all categories — Beacon will allow everything until you're ready to focus again.",
+    "Time-based blocking works best with simple rules like 'block reddit until 5pm' or 'allow youtube for 30 minutes'.",
     "Tip: You can click the circles in the tutorial to skip to any tip!"
 ];
 
