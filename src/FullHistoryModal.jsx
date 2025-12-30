@@ -15,6 +15,9 @@ const TIPS = [
     "Quick categories are broad — selecting 'Gaming' will block all gaming-related content on the web, from YouTube to Reddit.",
     "Need a break? Clear your prompt and uncheck all categories — Beacon will allow everything until you're ready to focus again.",
     "Time-based blocking works best with simple rules like 'block reddit until 5pm' or 'allow youtube for 30 minutes'.",
+    "Blocked a site by mistake? Add it to your 'Always Allow' list to override all other rules instantly.",
+    "Report bugs or request features using the buttons in the settings — we're always improving!",
+    "Presets are a great way to quickly switch between 'focus mode' and 'break mode' — create one for each!",
     "Tip: You can click the circles in the tutorial to skip to any tip!"
 ];
 
