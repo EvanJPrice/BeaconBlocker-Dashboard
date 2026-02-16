@@ -4,7 +4,7 @@
 const config = {
     BACKEND_URL: import.meta.env.DEV
         ? 'http://localhost:3000'
-        : 'https://chrometest.onrender.com',
+        : 'https://api.beaconblocker.com',
 };
 
 export default config;

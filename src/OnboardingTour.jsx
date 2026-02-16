@@ -11,9 +11,16 @@ const STEPS = [
         noSpotlight: true // Center welcome step, no spotlight needed
     },
     {
+        target: 'tour-settings-btn',
+        title: "Settings",
+        content: "The **Settings** gear is your command center. Here you can enable **Strict Mode** (unbreakable focus), manage your account, and customize your dashboard appearance.",
+        position: 'bottom',
+        highlightLogo: false
+    },
+    {
         target: 'tour-main-prompt',
         title: "Set Your Heading",
-        content: "The glowing box is your **Beacon** — your main tool for telling Beacon Blocker how it can help you. Here, you can 'set your heading' by writing what you're up to, and what will, or won't be, useful for your browsing session.\n\n(Try typing something now!)",
+        content: "The glowing box is your **Beacon** — your main tool for telling Beacon Blocker how it can help you. Write your goal or specific rules, and your Beacon will use AI to decide whether each **page you visit** should be blocked or allowed based on its URL, title, and content.\n\nYou can also set **timers** and **schedules** — e.g. \"block social media for 2 hours\" or \"until 5 PM.\" For simple site blocking, try the **Quick Block Categories** and **Allow/Block Lists** below.\n\n(Try typing something now!)",
         position: 'bottom',
         highlightLogo: true // Also highlight logo during this step
     },
@@ -31,14 +38,14 @@ const STEPS = [
     },
     {
         target: 'tour-update-preset-btn',
-        title: "Save To Button",
-        content: "The **Save To** button displays your current preset (which can be clicked on, when active, to change its name). If you make any changes this button will turn green, click it to save your changes. Click the **X** button to remove your current preset and reset the dashboard.",
+        title: "Update Preset",
+        content: "The **Update** button saves changes to your currently loaded preset. It displays your preset name (click the name to rename it). If you make changes, this button turns green — click it to update. Click the **X** to unload the preset and reset.",
         position: 'bottom'
     },
     {
         target: 'tour-save-preset-btn',
-        title: "Save As Button",
-        content: "The **Save As** button creates a new preset.",
+        title: "New Preset",
+        content: "The **New Preset** button saves your current settings as a new preset.",
         position: 'bottom'
     },
     {
@@ -66,14 +73,14 @@ const STEPS = [
     {
         target: 'tour-categories',
         title: "Categories",
-        content: "The **Quick Block Categories** are broad and domain agnostic. These will instruct Beacon Blocker to notice anything related to the category and block it for you. \n\n(e.g. Gaming related content on YouTube will be blocked if **Gaming** is selected).",
+        content: "The **Quick Block Categories** are broad and domain agnostic. Toggle these to instantly ban entire categories like Social Media or Gaming.\n\n(Note: Unchecked categories are ALLOWED unless your Main Prompt specifically blocks them.)",
         position: 'top',
         requireOpen: 'controls'
     },
     {
         target: 'tour-lists',
         title: "Lists",
-        content: "Entries on the **Always Allow**, or white, **List** will always be allowed, while entries on the **Always Block**, or black, **List** will always be blocked.",
+        content: "Entries on the **Always Allow**, or white, **List** will always be allowed (overriding everything else), while entries on the **Always Block**, or black, **List** will always be blocked.",
         position: 'top',
         requireOpen: 'controls'
     },

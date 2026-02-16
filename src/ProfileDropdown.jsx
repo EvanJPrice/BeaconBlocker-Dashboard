@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import PropTypes from 'prop-types';
 
-export default function ProfileDropdown({ userEmail, onSignOut, onDeleteAccount, theme, onThemeChange }) {
+export default function ProfileDropdown({ userEmail, onSignOut, onDeleteAccount }) {
     const [isOpen, setIsOpen] = useState(false);
     const [confirmSignOut, setConfirmSignOut] = useState(false);
     const dropdownRef = useRef(null);
@@ -77,43 +77,7 @@ export default function ProfileDropdown({ userEmail, onSignOut, onDeleteAccount,
                     }}
                 >
 
-                    <div style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '4px', paddingLeft: '4px' }}>Theme</div>
-                        <div style={{ display: 'flex', gap: '4px', background: 'var(--hover-bg)', padding: '4px', borderRadius: '6px' }}>
-                            {[
-                                { id: 'light', label: 'Light' },
-                                { id: 'dark', label: 'Dark' },
-                                { id: 'system', label: 'System' }
-                            ].map((mode) => (
-                                <button
-                                    key={mode.id}
-                                    type="button"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        onThemeChange(mode.id);
-                                    }}
-                                    style={{
-                                        flex: 1,
-                                        border: 'none',
-                                        background: theme === mode.id ? 'var(--card-bg)' : 'transparent',
-                                        color: theme === mode.id ? 'var(--text-primary)' : 'var(--text-secondary)',
-                                        boxShadow: theme === mode.id ? '0 1px 2px var(--shadow-color)' : 'none',
-                                        borderRadius: '4px',
-                                        padding: '6px 4px',
-                                        cursor: 'pointer',
-                                        fontSize: '0.85rem',
-                                        fontWeight: theme === mode.id ? '600' : '400',
-                                        display: 'flex',
-                                        justifyContent: 'center',
-                                        alignItems: 'center',
-                                        transition: 'all 0.2s'
-                                    }}
-                                >
-                                    {mode.label}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
+
 
                     <div style={{ padding: '4px' }}>
                         <button
@@ -141,18 +105,6 @@ export default function ProfileDropdown({ userEmail, onSignOut, onDeleteAccount,
                             {confirmSignOut ? 'Confirm Sign Out?' : 'Sign Out'}
                         </button>
                     </div>
-                    <div style={{ borderTop: '1px solid var(--border-color)', padding: '4px' }}>
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setIsOpen(false);
-                                if (onDeleteAccount) onDeleteAccount();
-                            }}
-                            className="profile-dropdown-item delete"
-                        >
-                            Delete Account
-                        </button>
-                    </div>
                 </div>
             )}
         </div>
@@ -162,7 +114,5 @@ export default function ProfileDropdown({ userEmail, onSignOut, onDeleteAccount,
 ProfileDropdown.propTypes = {
     userEmail: PropTypes.string,
     onSignOut: PropTypes.func,
-    onDeleteAccount: PropTypes.func,
-    theme: PropTypes.string,
-    onThemeChange: PropTypes.func
+    onDeleteAccount: PropTypes.func
 };

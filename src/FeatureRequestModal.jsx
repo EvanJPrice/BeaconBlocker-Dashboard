@@ -77,7 +77,7 @@ export default function FeatureRequestModal({ isOpen, onClose, userId, userEmail
             <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '500px', minHeight: 'auto', height: 'auto' }}>
                 <div className="modal-header">
                     <h2>Suggest a Feature</h2>
-                    <button className="modal-close-button" onClick={onClose}>&times;</button>
+                    <button className="modal-close-button" onClick={onClose}>✕</button>
                 </div>
 
                 {success ? (

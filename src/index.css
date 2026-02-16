@@ -129,6 +129,7 @@ select {
   border: 1px solid var(--border-color);
   border-radius: 8px;
   font-size: 1rem;
+  font-family: inherit;
   transition: border-color 0.2s;
   box-sizing: border-box;
 }
@@ -137,6 +138,21 @@ select {
   outline: none;
   border-color: var(--primary-blue);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+/* Force Chrome to re-evaluate autofill styling via animation */
+@keyframes autofillFix {
+  from { opacity: 0.99; }
+  to { opacity: 1; }
+}
+
+.form-input:-webkit-autofill,
+.form-input:-webkit-autofill:hover,
+.form-input:-webkit-autofill:focus {
+  font-family: 'IBM Plex Mono', monospace !important;
+  font-size: 1rem !important;
+  animation: autofillFix 0.01s forwards;
+  -webkit-text-fill-color: inherit;
 }
 
 .auth-button {

@@ -51,6 +51,18 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
     const [expandedLogId, setExpandedLogId] = useState(null); // Click to expand log details
     const [tipIndex, setTipIndex] = useState(0); // Rotating tip index
 
+    // Read logAllowDecisions from localStorage (synced with userSettings)
+    const logAllowDecisions = (() => {
+        try {
+            const saved = localStorage.getItem('beacon_userSettings');
+            if (saved) {
+                const settings = JSON.parse(saved);
+                return settings.logAllowDecisions || false;
+            }
+        } catch (e) {}
+        return false;
+    })();
+
     const modalContentRef = useRef(null);
 
     // Scroll to top when page changes
@@ -166,7 +178,7 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                         id: `local-${log.timestamp}-${index}`,
                         url: log.url,
                         domain: log.domain,
-                        decision: 'BLOCK',
+                        decision: log.decision || 'BLOCK', // Support both BLOCK and ALLOW
                         reason: log.reason,
                         page_title: log.pageTitle,
                         active_prompt: log.activePrompt || null,
@@ -176,12 +188,21 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                     // Apply search filter locally
                     if (debouncedSearchTerm) {
                         const term = debouncedSearchTerm.toLowerCase();
-                        formattedLogs = formattedLogs.filter(log =>
-                            log.url?.toLowerCase().includes(term) ||
-                            log.domain?.toLowerCase().includes(term) ||
-                            log.page_title?.toLowerCase().includes(term) ||
-                            log.active_prompt?.toLowerCase().includes(term)
-                        );
+
+                        // Check for decision type filter (ALLOW or BLOCK keywords)
+                        if (term === 'allow' || term === 'allowed') {
+                            formattedLogs = formattedLogs.filter(log => log.decision === 'ALLOW');
+                        } else if (term === 'block' || term === 'blocked') {
+                            formattedLogs = formattedLogs.filter(log => log.decision === 'BLOCK');
+                        } else {
+                            // Regular keyword search
+                            formattedLogs = formattedLogs.filter(log =>
+                                log.url?.toLowerCase().includes(term) ||
+                                log.domain?.toLowerCase().includes(term) ||
+                                log.page_title?.toLowerCase().includes(term) ||
+                                log.active_prompt?.toLowerCase().includes(term)
+                            );
+                        }
                     }
 
                     setLogs(formattedLogs);
@@ -268,7 +289,7 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
             >
                 <div className="modal-header" style={{ display: 'block', paddingBottom: '0' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
-                        <h2 style={{ margin: 0 }}>Full History</h2>
+                        <h2 style={{ margin: 0 }}>Browsing Activity</h2>
                         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                             <button
                                 id="tour-clear-history-btn"
@@ -283,21 +304,20 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                                     }
                                 }}
                             >
-                                {showClearConfirm ? "Confirm Clear History?" : "Clear History"}
+                                {showClearConfirm ? "Confirm Clear?" : "Clear History"}
                             </button>
                             <button
                                 className="modal-close-button"
                                 onClick={onClose}
-                                style={{ fontSize: '2rem', padding: '0 0.5rem', marginTop: '-0.5rem' }}
                             >
-                                &times;
+                                ✕
                             </button>
                         </div>
                     </div>
                     <div style={{ position: 'relative', marginBottom: '1rem' }}>
                         <input
                             type="text"
-                            placeholder="Search by URL, title, or domain..."
+                            placeholder="Search by keyword, ALLOW, or BLOCK..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                             style={{
@@ -375,9 +395,14 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                                         if (isSystemReset) {
                                             mainReason = "System Action"; // Or keep the specific string
                                         } else if (isCache) {
-                                            mainReason = "Cached decision";
-                                            expandedReason = "Previously evaluated";
+                                            // Extract original reason from "Cached decision · Reason" format
+                                            const cachedParts = log.reason.split(' · ');
+                                            const originalReason = cachedParts.length > 1 ? cachedParts.slice(1).join(' · ') : null;
+                                            mainReason = originalReason ? `Cached · ${originalReason}` : "Cached decision";
+                                            expandedReason = originalReason || "Previously evaluated";
                                         }
+
+                                        const isAllowDecision = log.decision === 'ALLOW';
 
                                         // Helper to get brand style
                                         const getLogStyle = (domain) => {
@@ -395,7 +420,14 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                                                 borderColor: SYSTEM_RESET_STYLE.border,
                                             };
                                         }
-                                        // 2. Brand Match (if not system)
+                                        // 2. Cached decisions - yellow accent
+                                        else if (isCache) {
+                                            itemStyle = {
+                                                borderLeft: '3px solid #eab308',
+                                                backgroundColor: 'rgba(234, 179, 8, 0.06)',
+                                            };
+                                        }
+                                        // 3. Brand colors for known domains
                                         else {
                                             const brandStyle = getLogStyle(log.domain);
                                             if (brandStyle) {
@@ -468,7 +500,22 @@ export default function FullHistoryModal({ isOpen, onClose, userId, getFaviconUr
                                                             {mainReason}
                                                         </span>
                                                     </div>
-                                                    {/* Decision badge removed - all logs are blocks now */}
+                                                    {!isSystemReset && logAllowDecisions && (
+                                                        <div style={{
+                                                            marginLeft: 'auto',
+                                                            padding: '0.2rem 0.5rem',
+                                                            borderRadius: '4px',
+                                                            fontSize: '0.65rem',
+                                                            fontWeight: '600',
+                                                            textTransform: 'uppercase',
+                                                            letterSpacing: '0.5px',
+                                                            backgroundColor: isAllowDecision ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                                                            color: isAllowDecision ? '#16a34a' : '#dc2626',
+                                                            whiteSpace: 'nowrap',
+                                                        }}>
+                                                            {isAllowDecision ? 'Allowed' : 'Blocked'}
+                                                        </div>
+                                                    )}
                                                 </div>
 
                                                 {expandedLogId === log.id && (

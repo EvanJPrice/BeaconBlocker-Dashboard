@@ -163,7 +163,7 @@ export default function BugReportModal({ isOpen, onClose, userId, userEmail }) {
             <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '500px', minHeight: 'auto', height: 'auto' }}>
                 <div className="modal-header">
                     <h2>Report a Bug</h2>
-                    <button className="modal-close-button" onClick={onClose}>&times;</button>
+                    <button className="modal-close-button" onClick={onClose}>✕</button>
                 </div>
 
                 {success ? (

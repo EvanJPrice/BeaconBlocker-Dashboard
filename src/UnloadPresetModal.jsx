@@ -8,7 +8,7 @@ export default function UnloadPresetModal({ isOpen, onClose, onUnload }) {
             <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px', height: 'auto', minHeight: 'auto' }}>
                 <div className="modal-header">
                     <h2>Reset Dashboard?</h2>
-                    <button className="modal-close-button" onClick={onClose}>&times;</button>
+                    <button className="modal-close-button" onClick={onClose}>✕</button>
                 </div>
 
                 <div style={{ padding: '1rem 0' }}>
@@ -27,7 +27,7 @@ export default function UnloadPresetModal({ isOpen, onClose, onUnload }) {
                         <button
                             onClick={onUnload}
                             className="primary-button"
-                            style={{ padding: '10px 20px' }} 
+                            style={{ padding: '10px 20px' }}
                         >
                             Reset
                         </button>

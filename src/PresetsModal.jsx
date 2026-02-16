@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './Dashboard.css';
 
-function PresetsModal({ isOpen, onClose, presets, activePresetId, onLoad, onRename, onDelete }) {
+function PresetsModal({ isOpen, onClose, presets, activePresetId, onLoad, onRename, onDelete, isStrictModeActive }) {
     const [editingId, setEditingId] = useState(null);
     const [editName, setEditName] = useState('');
     const [deleteConfirmId, setDeleteConfirmId] = useState(null);
@@ -127,8 +127,13 @@ function PresetsModal({ isOpen, onClose, presets, activePresetId, onLoad, onRena
                                                         <button
                                                             className="primary-button modal-action-btn"
                                                             onClick={() => { onLoad(preset); handleModalClose(); }}
-                                                            title="Load Preset"
-                                                            style={{ minWidth: '60px' }}
+                                                            title={isStrictModeActive ? "Cannot load presets during Strict Mode" : "Load Preset"}
+                                                            style={{
+                                                                minWidth: '60px',
+                                                                opacity: isStrictModeActive ? 0.5 : 1,
+                                                                cursor: isStrictModeActive ? 'not-allowed' : 'pointer'
+                                                            }}
+                                                            disabled={isStrictModeActive}
                                                         >
                                                             Load
                                                         </button>

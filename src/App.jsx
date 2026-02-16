@@ -14,13 +14,10 @@ import { encryptPrompt, decryptPrompt } from './cryptoUtils.js'; // Prompt encry
 import ProfileDropdown from './ProfileDropdown';
 // SavePresetModal removed as part of workflow refactor
 import PresetsModal from './PresetsModal';
+import SettingsModal from './SettingsModal';
+import ReferralBanner from './ReferralBanner';
+import { getReferralStats } from './api/referral';
 // CSS is imported in main.jsx
-
-// --- Helper function to generate API key ---
-function generateApiKey() {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    return Array.from({ length: 32 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-}
 
 // --- Helper: Get base domain ---
 function getBaseDomain(urlString) {
@@ -51,6 +48,51 @@ const getFaviconUrl = (domain) => {
 
 // --- Extension Communication (for local block logs) ---
 // Uses CustomEvent bridge via content script
+
+// --- Direct Extension Messaging for Pause Sync ---
+// Uses externally_connectable for reliable dashboard->extension communication
+function syncPauseToExtension(paused) {
+    // Get extension ID from the marker element injected by content script
+    const marker = document.getElementById('beacon-extension-status');
+    const extensionId = marker?.getAttribute('data-extension-id');
+
+    console.log('[DASHBOARD] syncPauseToExtension called, paused:', paused, 'extensionId:', extensionId);
+
+    // Try direct messaging first (more reliable) - requires extension ID
+    if (extensionId && typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+        try {
+            chrome.runtime.sendMessage(
+                extensionId,
+                { type: 'SYNC_PAUSE', paused: paused },
+                (response) => {
+                    if (chrome.runtime.lastError) {
+                        console.log('[DASHBOARD] Direct pause sync failed:', chrome.runtime.lastError.message);
+                        // Fallback to CustomEvent
+                        document.dispatchEvent(new CustomEvent('BEACON_PAUSE_SYNC', { detail: { paused } }));
+                    } else {
+                        console.log('[DASHBOARD] Pause sync response:', response);
+                    }
+                }
+            );
+        } catch (e) {
+            console.log('[DASHBOARD] chrome.runtime error:', e);
+            // Fallback to CustomEvent
+            document.dispatchEvent(new CustomEvent('BEACON_PAUSE_SYNC', { detail: { paused } }));
+        }
+    } else {
+        // Fallback to CustomEvent bridge (content script will forward to background)
+        console.log('[DASHBOARD] Using CustomEvent fallback for pause sync (no extension ID or chrome.runtime)');
+        document.dispatchEvent(new CustomEvent('BEACON_PAUSE_SYNC', { detail: { paused } }));
+    }
+}
+
+// --- Sync Activity Log Settings to Extension ---
+function syncActivityLogSettingsToExtension(autoDelete, retentionDays, logAllowDecisions) {
+    // Use CustomEvent bridge (same pattern as pause sync)
+    document.dispatchEvent(new CustomEvent('BEACON_ACTIVITY_LOG_SETTINGS_SYNC', {
+        detail: { autoDelete, retentionDays, logAllowDecisions }
+    }));
+}
 
 async function fetchBlockLogsFromExtension() {
     return new Promise((resolve) => {
@@ -96,13 +138,16 @@ const BLOCKED_CATEGORIES = [
     { id: 'entertainment', label: 'Movies & TV', desc: 'Netflix, Hulu, Disney+' },
     { id: 'streaming', label: 'Streaming Services', desc: 'YouTube, Twitch, Netflix' },
     { id: 'games', label: 'Gaming', desc: 'Steam, Roblox, IGN' },
-    { id: 'sports', label: 'Sports', desc: 'ESPN, NBA, NFL, Live Sports' },
-    { id: 'finance', label: 'Finance', desc: 'Coinbase, Stocks, Trading' },
-    { id: 'travel', label: 'Travel & Real Estate', desc: 'Airbnb, Zillow, Booking, Redfin' },
+    { id: 'ai_chatbots', label: 'AI / Chatbots', desc: 'ChatGPT, Gemini, Claude' },
+    { id: 'communication', label: 'Communication', desc: 'Gmail, Slack, WhatsApp Web' },
+    { id: 'wikis', label: 'Wikis / Rabbit Holes', desc: 'Wikipedia, Fandom, WikiHow' },
     { id: 'forums', label: 'Forums', desc: 'Reddit, Quora, StackOverflow' },
     { id: 'shopping', label: 'Shopping', desc: 'Amazon, eBay, Shopify' },
     { id: 'mature', label: 'Mature Content', desc: 'Adult sites, Gambling' }
 ];
+
+// --- Track last synced auth token to prevent loop ---
+let lastSyncedAuthToken = null;
 
 // === Map common names to domains ===
 const commonSiteMappings = {
@@ -127,8 +172,80 @@ const commonSiteMappings = {
     'claude': 'anthropic.com', 'gemini': 'gemini.google.com', 'letterboxd': 'letterboxd.com'
 };
 
+// --- SUBSCRIPTION GUARD COMPONENT ---
+function SubscriptionGuard({ session, children, openSettingsToSubscription, onSignOut }) {
+    const [status, setStatus] = useState(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        if (!session?.access_token) {
+            setLoading(false);
+            return;
+        }
+
+        const checkStatus = async () => {
+            try {
+                const res = await fetch(`${config.BACKEND_URL}/api/payments/status`, {
+                    headers: { 'Authorization': `Bearer ${session.access_token}` }
+                });
+                if (res.ok) {
+                    setStatus(await res.json());
+                }
+            } catch (e) {
+                console.error('Sub Check Error:', e);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        checkStatus();
+    }, [session]);
+
+    if (loading) return <div></div>; // fast load
+
+    const isPro = status?.is_pro;
+    const isTrial = status?.trial_active;
+    const hasAccess = isPro || isTrial;
+
+    return (
+        <>
+            {!hasAccess && status && (
+                <div style={{
+                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                    background: 'rgba(0,0,0,0.85)', zIndex: 999,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    flexDirection: 'column', color: 'white', textAlign: 'center'
+                }}>
+                    <h1 style={{ fontSize: '3rem', marginBottom: '1rem' }}>Free Access Expired</h1>
+                    <p style={{ fontSize: '1.2rem', maxWidth: '500px', marginBottom: '2rem', opacity: 0.8 }}>
+                        Your free access has ended. Subscribe to keep your digital distractions at bay.
+                    </p>
+                    <button
+                        className="primary-button"
+                        style={{ fontSize: '1.2rem', padding: '1rem 2rem' }}
+                        onClick={openSettingsToSubscription}
+                    >
+                        Subscribe Now
+                    </button>
+                    <button
+                        onClick={onSignOut}
+                        style={{
+                            marginTop: '1.5rem', background: 'none', border: 'none',
+                            color: 'rgba(255,255,255,0.5)', cursor: 'pointer',
+                            fontSize: '0.9rem', textDecoration: 'underline'
+                        }}
+                    >
+                        Sign Out
+                    </button>
+                </div>
+            )}
+            {children}
+        </>
+    );
+}
+
 // === Dashboard Component ===
-function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearch, theme, onThemeChange, extensionStatus, onRestartTour }) {
+function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearch, theme, onThemeChange, extensionStatus, onRestartTour, showSubscriptionModal, onSubscriptionModalShown }) {
     const [loading, setLoading] = useState(true);
     const [message, setMessage] = useState(null);
     const [apiKey, setApiKey] = useState(null);
@@ -146,6 +263,147 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
     const [currentBlockInput, setCurrentBlockInput] = useState('');
     const [logs, setLogs] = useState([]);
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false); // Add missing state for Delete Account modal
+
+    // --- Settings Modal State ---
+    const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+    const [settingsInitialTab, setSettingsInitialTab] = useState('analytics'); // New state for deep linking
+
+    // Open SettingsModal to subscription tab when triggered by SubscriptionGuard
+    useEffect(() => {
+        if (showSubscriptionModal) {
+            setSettingsInitialTab('subscription');
+            setIsSettingsModalOpen(true);
+            onSubscriptionModalShown();
+        }
+    }, [showSubscriptionModal]);
+
+    const [userSettings, setUserSettings] = useState(() => {
+        const saved = localStorage.getItem('beacon_userSettings');
+        return saved ? JSON.parse(saved) : {
+            // Analytics & Insights
+            weeklySummaryEmail: false,
+            // Activity & Privacy
+            showAllActivity: false,
+            // Blocking Behavior - Strict Mode
+            strictMode: false,
+            strictModeUntil: null, // timestamp when strict mode ends
+            strictModeIndefinite: false, // no timer, requires accountability contact
+            strictModeDurationHours: 4,
+            strictModeDurationMinutes: 0,
+            // Accountability Contact
+            accountabilityContactRequired: false,
+            accountabilityContactName: '', // e.g., "Mom", "Study Buddy"
+            accountabilityContactMethod: 'email', // 'email' or 'phone'
+            accountabilityContactValue: '', // email address or phone number
+            accountabilityContactVerified: false,
+            // Emergency Exit
+            lastEmergencyExit: null, // timestamp of last emergency exit (7-day cooldown)
+            // Blocking Behavior - Other
+            optimisticBlocking: false,
+            blockingPaused: false, // temporarily disable blocking without logging out
+            showEnvironment: false,
+            // Activity Log Auto-Delete
+            autoDeleteActivityLog: false, // OFF by default - user must opt-in
+            activityLogRetention: 7, // 7 or 30 days when enabled
+            // ALLOW Decision Logging
+            logAllowDecisions: false // OFF by default - only log blocks unless user opts in
+        };
+    });
+    const [storageUsage, setStorageUsage] = useState({ used: 0, max: 10485760 }); // 10 MB in bytes
+
+    // Fetch storage usage from extension when settings modal opens
+    useEffect(() => {
+        if (isSettingsModalOpen) {
+            console.log('[Storage] Requesting storage usage via CustomEvent...');
+
+            // Listen for response
+            const handleStorageResponse = (event) => {
+                console.log('[Storage] Response received:', event.detail);
+                setStorageUsage({ used: event.detail.used, max: event.detail.max });
+            };
+
+            window.addEventListener('BEACON_STORAGE_USAGE_RESPONSE', handleStorageResponse);
+
+            // Request storage usage
+            document.dispatchEvent(new CustomEvent('BEACON_GET_STORAGE_USAGE'));
+
+            // Cleanup listener
+        }
+    }, [isSettingsModalOpen]);
+
+    // --- Pause State: Read FROM extension on mount (extension is source of truth) ---
+    const pauseInitialized = useRef(false);
+    useEffect(() => {
+        const handlePauseResponse = (event) => {
+            const paused = event.detail?.paused ?? false;
+            pauseInitialized.current = true;
+            setUserSettings(prev => ({ ...prev, blockingPaused: paused }));
+            localStorage.setItem('beacon_userSettings', JSON.stringify({
+                ...JSON.parse(localStorage.getItem('beacon_userSettings') || '{}'),
+                blockingPaused: paused
+            }));
+        };
+        window.addEventListener('BEACON_PAUSE_STATE_RESPONSE', handlePauseResponse);
+        document.dispatchEvent(new CustomEvent('BEACON_GET_PAUSE_STATE'));
+        return () => window.removeEventListener('BEACON_PAUSE_STATE_RESPONSE', handlePauseResponse);
+    }, []); // mount only
+
+    // After init: sync user-initiated pause changes TO extension
+    useEffect(() => {
+        if (pauseInitialized.current && typeof userSettings.blockingPaused === 'boolean') {
+            syncPauseToExtension(userSettings.blockingPaused);
+        }
+    }, [userSettings.blockingPaused]);
+
+    // Sync activity log settings (including logAllowDecisions) to extension on mount and when changed
+    useEffect(() => {
+        document.dispatchEvent(new CustomEvent('BEACON_ACTIVITY_LOG_SETTINGS_SYNC', {
+            detail: {
+                autoDelete: userSettings.autoDeleteActivityLog,
+                retentionDays: userSettings.activityLogRetention ?? 7,
+                logAllowDecisions: userSettings.logAllowDecisions ?? false
+            }
+        }));
+    }, [userSettings.autoDeleteActivityLog, userSettings.activityLogRetention, userSettings.logAllowDecisions]);
+
+    const isStrictModeActive = userSettings.strictModeUntil && userSettings.strictModeUntil > Date.now();
+
+    // --- Poll for external strict mode changes (e.g., unlock approved via webhook) ---
+    useEffect(() => {
+        if (!isStrictModeActive || !session?.user) return;
+
+        const checkStrictModeStatus = async () => {
+            try {
+                const { data } = await supabase
+                    .from('rules')
+                    .select('strict_mode_until')
+                    .eq('user_id', session.user.id)
+                    .single();
+
+                // If DB shows null but local shows active, an unlock was approved externally
+                if (!data?.strict_mode_until && userSettings.strictModeUntil) {
+                    console.log('[DASHBOARD] Strict mode cleared externally (unlock approved)');
+                    setUserSettings(prev => ({ ...prev, strictModeUntil: null, strictMode: false }));
+                    localStorage.setItem('beacon_userSettings', JSON.stringify({
+                        ...userSettings, strictModeUntil: null, strictMode: false
+                    }));
+                    showToast('Strict mode disabled - unlock request approved!');
+                }
+            } catch (err) {
+                console.error('[DASHBOARD] Error checking strict mode status:', err);
+            }
+        };
+
+        // Poll every 30 seconds while strict mode is active
+        const interval = setInterval(checkStrictModeStatus, 30000);
+        return () => clearInterval(interval);
+    }, [isStrictModeActive, session?.user?.id, userSettings.strictModeUntil]);
+
+    // --- Toast Notification Helper ---
+    const showToast = (msg, duration = 4000) => {
+        setMessage(msg);
+        setTimeout(() => setMessage(null), duration);
+    };
 
     // --- Presets State ---
     const [presets, setPresets] = useState([]);
@@ -226,15 +484,14 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
 
 
     const PLACEHOLDER_EXAMPLES = [
-        "I need to study for biology. Block everything except Wikipedia and Khan Academy.",
-        "I'm debugging a React app. Block social media but allow Stack Overflow and GitHub.",
-        "I want to write a blog post. Block all websites except Google Docs and Thesaurus.com.",
-        "I need to read a book. Block the entire internet for 45 minutes.",
-        "I'm planning a trip. Allow Airbnb and flights, but block work email and Slack.",
-        "Focus mode: Block Reddit, Twitter, and Facebook. Allow everything else.",
-        "I am learning to cook. Allow YouTube and recipe sites, but block news and politics.",
-        "Late night work. Block Netflix, Hulu, and Twitch. Allow my company portal.",
-        "I need to finish my thesis. Block everything except .edu sites and Google Scholar."
+        "Allow educational YouTube videos about coding and science. Block entertainment, drama, and shorts.",
+        "I'm planning a vacation. Allow travel and hotel sites but block social media and news.",
+        "Block all social media for 2 hours so I can focus on my assignment.",
+        "Block explicit or violent content across all websites.",
+        "Allow Facebook Marketplace but block the Facebook news feed.",
+        "Block everything except .edu sites and Google Scholar until 5 PM.",
+        "Block clickbait news articles. Allow investigative journalism and local news.",
+        "I need to finish my thesis. Block the entire internet for 45 minutes."
     ];
 
     useEffect(() => {
@@ -314,7 +571,7 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
             setLoading(true);
             const { data: { user } } = await supabase.auth.getUser();
 
-            let { data, error } = await supabase.from('rules').select('prompt, blocked_categories, allow_list, block_list, active_preset_id').eq('user_id', user.id).single();
+            let { data, error } = await supabase.from('rules').select('prompt, blocked_categories, allow_list, block_list, active_preset_id, strict_mode_until').eq('user_id', user.id).single();
 
             if (error && error.code !== 'PGRST116') { console.error('Error loading data:', error); }
             const initialCategories = {}; BLOCKED_CATEGORIES.forEach(cat => initialCategories[cat.id] = false);
@@ -329,6 +586,15 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                 loadedBlockList = Array.isArray(data.block_list) ? data.block_list : [];
                 loadedActivePresetId = data.active_preset_id;
                 BLOCKED_CATEGORIES.forEach(cat => { if (loadedCategories[cat.id] === undefined) { loadedCategories[cat.id] = false; } });
+
+                // Sync strict mode from DB - if cleared externally (unlock approved while offline)
+                const localStrictMode = JSON.parse(localStorage.getItem('beacon_userSettings') || '{}');
+                if (!data.strict_mode_until && localStrictMode.strictModeUntil) {
+                    console.log('[DASHBOARD] Strict mode was cleared externally while offline');
+                    const updatedSettings = { ...localStrictMode, strictModeUntil: null, strictMode: false };
+                    localStorage.setItem('beacon_userSettings', JSON.stringify(updatedSettings));
+                    setUserSettings(prev => ({ ...prev, strictModeUntil: null, strictMode: false }));
+                }
             }
 
             setMainPrompt(loadedMainPrompt); setApiKey(loadedApiKey); setBlockedCategories(loadedCategories);
@@ -573,7 +839,6 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
             setNewPresetName('');
             setSaveWarning(null);
             setOverwriteCandidate(null);
-            setMessage(`Preset "${name}" saved!`);
 
             // Update checkpoint
             setLastCheckpoint({
@@ -680,9 +945,8 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
         const { error } = await supabase.from('settings_presets').insert([presetData]);
 
         if (error) {
-            setMessage(`Error saving preset: ${error.message}`);
+            showToast(`Error saving preset: ${error.message}`);
         } else {
-            setMessage('Preset saved!');
             fetchPresets();
             // Also update checkpoint since saving a preset implies we are happy with current state
             setLastCheckpoint({
@@ -771,6 +1035,11 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
     };
 
     const handleLoadPreset = async (preset) => {
+        // Block preset loading during strict mode (UI already disables button, this is a safeguard)
+        if (isStrictModeActive) {
+            return;
+        }
+
         // Only warn if there is UN-SAVED work that would be lost
         if (hasUnsavedChanges) {
             // Show custom modal instead of browser confirm
@@ -823,11 +1092,15 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
             block_list: preset.block_list || []
         });
         setHasUnsavedChanges(false);
-
-        setMessage(`Preset "${preset.name}" loaded!`);
     };
 
     const handleUnloadPreset = async () => {
+        // Block preset unloading during strict mode (UI already disables button, this is a safeguard)
+        if (isStrictModeActive) {
+            setIsUnloadModalOpen(false);
+            return;
+        }
+
         setIsUnloadModalOpen(false);
 
         // 1. Reset Dashboard UI to Default State
@@ -857,7 +1130,7 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
         // causing it to tell background.js to wipe the chrome.storage cache.
         window.dispatchEvent(new CustomEvent('BEACON_RULES_UPDATED'));
 
-        setMessage('Dashboard cleared and cache reset.');
+        showToast('Dashboard cleared and cache reset.');
     };
 
     const handleRenamePreset = async (id, newName) => {
@@ -871,6 +1144,11 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
     };
 
     const handleDeletePreset = async (id) => {
+        // Block deleting the active preset during strict mode (UI already disables button, this is a safeguard)
+        if (isStrictModeActive && activePreset && activePreset.id === id) {
+            return;
+        }
+
         // If deleting the currently active preset, unload and RESET dashboard
         if (activePreset && activePreset.id === id) {
             setActivePreset(null);
@@ -924,7 +1202,7 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                 id: `local-${log.timestamp}-${index}`,
                 url: log.url,
                 domain: log.domain,
-                decision: 'BLOCK', // All logs from extension are blocks
+                decision: log.decision || 'BLOCK', // Use actual decision from extension
                 reason: log.reason,
                 page_title: log.pageTitle,
                 active_prompt: log.activePrompt || null, // Include active prompt for filtering
@@ -943,12 +1221,10 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
 
         fetchLogs();
 
-        // Poll for new logs every 5 seconds (instead of real-time subscription)
-        const pollInterval = setInterval(fetchLogs, 5000);
+        // Poll for new logs every 10 seconds (reduced from 5s to prevent log spam)
+        const pollInterval = setInterval(fetchLogs, 10000);
 
-        return () => {
-            clearInterval(pollInterval);
-        };
+        return () => clearInterval(pollInterval);
 
     }, [session]);
 
@@ -968,12 +1244,26 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
             }
         };
 
+        // Sync pause state if changed from popup or another tab
+        const handlePauseUpdate = (event) => {
+            const paused = event.detail?.paused;
+            if (typeof paused === 'boolean') {
+                setUserSettings(prev => ({ ...prev, blockingPaused: paused }));
+                localStorage.setItem('beacon_userSettings', JSON.stringify({
+                    ...JSON.parse(localStorage.getItem('beacon_userSettings') || '{}'),
+                    blockingPaused: paused
+                }));
+            }
+        };
+
         window.addEventListener('BEACON_BLOCK_LOG_UPDATED', handleLogUpdate);
         window.addEventListener('BEACON_THEME_UPDATED', handleThemeUpdate);
+        window.addEventListener('BEACON_PAUSE_UPDATED', handlePauseUpdate);
 
         return () => {
             window.removeEventListener('BEACON_BLOCK_LOG_UPDATED', handleLogUpdate);
             window.removeEventListener('BEACON_THEME_UPDATED', handleThemeUpdate);
+            window.removeEventListener('BEACON_PAUSE_UPDATED', handlePauseUpdate);
         };
     }, [theme]); // Re-subscribe when theme changes to ensure handler has latest theme value
 
@@ -1040,7 +1330,6 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
 
             if (!response.ok) {
                 const errorData = await response.json();
-                console.error("DEBUG: Server Error Data:", errorData);
                 throw new Error(errorData.error || 'Failed to delete account');
             }
 
@@ -1077,6 +1366,11 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
 
     // --- Add Domain Handler (Auto-save) ---
     const handleAddDomain = (listType) => {
+        // Block adding domains during strict mode (UI already disables inputs, this is a safeguard)
+        if (isStrictModeActive) {
+            return;
+        }
+
         setInputError({ type: null, msg: null });
         const inputVal = (listType === 'allow' ? currentAllowInput : currentBlockInput).trim();
 
@@ -1130,6 +1424,11 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
 
     // --- Remove Domain Handler (Auto-save) ---
     const handleRemoveDomain = (listType, domainToRemove) => {
+        // Block removing domains during strict mode (UI already disables buttons, this is a safeguard)
+        if (isStrictModeActive) {
+            return;
+        }
+
         if (listType === 'allow') {
             const newList = allowListArray.filter(d => d !== domainToRemove);
             setAllowListArray(newList);
@@ -1143,6 +1442,11 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
 
     // --- Clear List Handler (Auto-save) ---
     const handleClearList = (listType) => {
+        // Block clearing lists during strict mode (UI already disables buttons, this is a safeguard)
+        if (isStrictModeActive) {
+            return;
+        }
+
         if (clearConfirmation === listType) {
             if (listType === 'allow') {
                 setAllowListArray([]);
@@ -1188,22 +1492,6 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
         return () => clearTimeout(timer);
     }, [mainPrompt, blockedCategories, allowListArray, blockListArray, loading, session, lastCheckpoint]);
 
-    // --- Regenerate API key function ---
-    async function regenerateApiKey() {
-        if (!confirm('Are you sure?')) return; setLoading(true); setMessage(null);
-        const { data: { user } = {} } = await supabase.auth.getUser(); // Added default empty object for data
-        if (!user) {
-            setMessage('Error: User not found. Please log in again.');
-            setLoading(false);
-            return;
-        }
-        const newKey = generateApiKey(); // Define newKey here
-        const updates = { user_id: user.id, api_key: newKey };
-        let { error } = await supabase.from('rules').upsert(updates, { onConflict: 'user_id' });
-        if (error) { setMessage(`Error: ${error.message}`); } else { setApiKey(newKey); setMessage('New Key generated!'); }
-        setLoading(false);
-    }
-
     // --- Render Dashboard UI ---
     return (
         <div className="dashboard-container">
@@ -1233,16 +1521,140 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                     </div>
                 </div>
             )}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', marginTop: '1rem' }}>
+            {userSettings.showEnvironment && (
+                <>
+                    <div className="environmental-clouds">
+                        {/* Fluffy clouds with natural irregular shapes and subtle shading */}
+                        <svg className="cloud-band layer-1" viewBox="0 0 1200 200" preserveAspectRatio="none">
+                            <defs>
+                                <filter id="cloud-shadow-1" x="-20%" y="-20%" width="140%" height="140%">
+                                    <feDropShadow dx="0" dy="4" stdDeviation="3" floodColor="#94a3b8" floodOpacity="0.3" />
+                                </filter>
+                            </defs>
+                            <g className="cloud-group" filter="url(#cloud-shadow-1)">
+                                {/* Cloud cluster 1 */}
+                                <ellipse cx="80" cy="110" rx="95" ry="75" />
+                                <ellipse cx="150" cy="65" rx="115" ry="95" />
+                                <ellipse cx="50" cy="55" rx="75" ry="65" />
+                                <ellipse cx="230" cy="100" rx="88" ry="70" />
+                                <ellipse cx="180" cy="135" rx="82" ry="62" />
+                                {/* Cloud cluster 2 */}
+                                <ellipse cx="360" cy="90" rx="105" ry="84" />
+                                <ellipse cx="450" cy="45" rx="128" ry="105" />
+                                <ellipse cx="310" cy="40" rx="82" ry="70" />
+                                <ellipse cx="520" cy="85" rx="95" ry="78" />
+                                <ellipse cx="390" cy="125" rx="75" ry="62" />
+                                {/* Cloud cluster 3 */}
+                                <ellipse cx="640" cy="100" rx="98" ry="78" />
+                                <ellipse cx="740" cy="50" rx="135" ry="110" />
+                                <ellipse cx="590" cy="45" rx="88" ry="75" />
+                                <ellipse cx="830" cy="90" rx="84" ry="68" />
+                                <ellipse cx="690" cy="130" rx="78" ry="62" />
+                                {/* Cloud cluster 4 */}
+                                <ellipse cx="940" cy="85" rx="115" ry="92" />
+                                <ellipse cx="1030" cy="40" rx="108" ry="88" />
+                                <ellipse cx="885" cy="45" rx="78" ry="65" />
+                                <ellipse cx="1100" cy="80" rx="92" ry="75" />
+                                <ellipse cx="970" cy="120" rx="70" ry="57" />
+                                {/* Cloud cluster 5 - connects to start */}
+                                <ellipse cx="1160" cy="95" rx="102" ry="82" />
+                                <ellipse cx="1200" cy="110" rx="95" ry="75" />
+                            </g>
+                        </svg>
+                        <svg className="cloud-band layer-2" viewBox="0 0 1200 200" preserveAspectRatio="none">
+                            <defs>
+                                <filter id="cloud-shadow-2" x="-20%" y="-20%" width="140%" height="140%">
+                                    <feDropShadow dx="0" dy="3" stdDeviation="2" floodColor="#94a3b8" floodOpacity="0.25" />
+                                </filter>
+                            </defs>
+                            <g className="cloud-group" filter="url(#cloud-shadow-2)">
+                                {/* Offset cloud clusters */}
+                                <ellipse cx="45" cy="130" rx="92" ry="75" />
+                                <ellipse cx="140" cy="85" rx="110" ry="92" />
+                                <ellipse cx="220" cy="120" rx="78" ry="65" />
+                                <ellipse cx="95" cy="155" rx="68" ry="55" />
+                                {/* Cluster 2 */}
+                                <ellipse cx="320" cy="110" rx="102" ry="82" />
+                                <ellipse cx="420" cy="60" rx="125" ry="102" />
+                                <ellipse cx="500" cy="105" rx="88" ry="70" />
+                                <ellipse cx="365" cy="140" rx="75" ry="60" />
+                                {/* Cluster 3 */}
+                                <ellipse cx="590" cy="120" rx="105" ry="84" />
+                                <ellipse cx="700" cy="65" rx="120" ry="98" />
+                                <ellipse cx="785" cy="110" rx="82" ry="68" />
+                                <ellipse cx="640" cy="145" rx="70" ry="57" />
+                                {/* Cluster 4 */}
+                                <ellipse cx="880" cy="105" rx="108" ry="88" />
+                                <ellipse cx="980" cy="55" rx="115" ry="95" />
+                                <ellipse cx="1055" cy="100" rx="84" ry="70" />
+                                <ellipse cx="920" cy="135" rx="75" ry="62" />
+                                {/* Cluster 5 - connects */}
+                                <ellipse cx="1130" cy="115" rx="98" ry="78" />
+                                <ellipse cx="1200" cy="130" rx="92" ry="75" />
+                            </g>
+                        </svg>
+                        {/* Layer 3: Bright white accent clouds - varied shapes */}
+                        <svg className="cloud-band layer-3" viewBox="0 0 1200 200" preserveAspectRatio="none">
+                            <defs>
+                                <filter id="cloud-shadow-3" x="-20%" y="-20%" width="140%" height="140%">
+                                    <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="#94a3b8" floodOpacity="0.2" />
+                                </filter>
+                            </defs>
+                            <g className="cloud-group" filter="url(#cloud-shadow-3)">
+                                {/* Cluster 1 - tall wispy shape */}
+                                <ellipse cx="70" cy="95" rx="55" ry="70" />
+                                <ellipse cx="130" cy="60" rx="72" ry="58" />
+                                <ellipse cx="45" cy="55" rx="48" ry="62" />
+                                <ellipse cx="160" cy="100" rx="60" ry="50" />
+                                {/* Cluster 2 - wide flat shape */}
+                                <ellipse cx="320" cy="80" rx="95" ry="52" />
+                                <ellipse cx="400" cy="55" rx="80" ry="48" />
+                                <ellipse cx="280" cy="60" rx="70" ry="45" />
+                                <ellipse cx="450" cy="85" rx="65" ry="55" />
+                                {/* Cluster 3 - mixed puffy */}
+                                <ellipse cx="600" cy="70" rx="68" ry="72" />
+                                <ellipse cx="680" cy="95" rx="85" ry="55" />
+                                <ellipse cx="560" cy="90" rx="55" ry="60" />
+                                <ellipse cx="740" cy="65" rx="62" ry="52" />
+                                {/* Cluster 4 - elongated */}
+                                <ellipse cx="880" cy="75" rx="90" ry="50" />
+                                <ellipse cx="970" cy="55" rx="75" ry="62" />
+                                <ellipse cx="840" cy="60" rx="58" ry="55" />
+                                <ellipse cx="1030" cy="90" rx="70" ry="48" />
+                                {/* Cluster 5 - connects with varied shapes */}
+                                <ellipse cx="1120" cy="80" rx="65" ry="68" />
+                                <ellipse cx="1180" cy="95" rx="78" ry="55" />
+                            </g>
+                        </svg>
+                    </div>
+                    <div className="environmental-water">
+                        {/* Two solid wave layers - pattern repeats at midpoint for seamless loop */}
+                        <svg className="wave layer-1" viewBox="0 0 1200 320" preserveAspectRatio="none">
+                            <path d="M0,80 Q75,140 150,80 Q225,20 300,80 Q375,140 450,80 Q525,20 600,80 Q675,140 750,80 Q825,20 900,80 Q975,140 1050,80 Q1125,20 1200,80 L1200,320 L0,320 Z" />
+                        </svg>
+                        <svg className="wave layer-2" viewBox="0 0 1200 320" preserveAspectRatio="none">
+                            <path d="M0,100 Q100,160 200,100 Q300,40 400,100 Q500,160 600,100 Q700,40 800,100 Q900,160 1000,100 Q1100,40 1200,100 L1200,320 L0,320 Z" />
+                        </svg>
+                    </div>
+                </>
+            )}
+            <div className="dashboard-header" style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                width: '100%',
+                marginBottom: '2rem',
+                padding: '0'
+            }}>
                 <div id="tour-welcome-header" style={{ display: 'flex', alignItems: 'center', gap: '20px', position: 'relative' }}>
                     {/* Logo Wrapper with Beacon Light and Save Glow */}
                     <div
                         id="tour-auto-sync"
-                        className={`logo-wrapper ${saveStatus === 'saving' ? 'saving' : saveStatus === 'saved' ? 'saved' : ''}`}
+                        className={`logo-wrapper ${saveStatus === 'saving' ? 'saving' : saveStatus === 'saved' ? 'saved' : ''} ${extensionStatus !== 'active' && extensionStatus !== 'loading' ? 'disconnected' : ''}`}
                         style={{
                             position: 'relative',
-                            width: '100px',
-                            height: '100px',
+                            width: '120px',
+                            height: '120px',
                             borderRadius: '50%',
                             transition: 'box-shadow 0.3s ease'
                         }}
@@ -1252,18 +1664,20 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                         {/* Status Tooltip on Logo Hover */}
                         <div className="beacon-tooltip">
                             <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
-                                {saveStatus === 'saving' ? 'Saving Changes...' :
-                                    saveStatus === 'saved' ? 'Changes Saved' :
-                                        extensionStatus === 'active' ? 'Extension Active' :
-                                            extensionStatus === 'logged_out' ? 'Extension Disconnected' :
-                                                'Extension Not Detected'}
+                                {extensionStatus !== 'active' && extensionStatus !== 'loading'
+                                    ? (extensionStatus === 'logged_out' ? 'Extension Disconnected' : 'Extension Not Detected')
+                                    : saveStatus === 'saving' ? 'Saving Changes...'
+                                        : saveStatus === 'saved' ? 'Changes Saved'
+                                            : 'Extension Active'}
                             </div>
                             <div style={{ fontSize: '0.8rem', opacity: 0.9 }}>
-                                {saveStatus === 'saving' ? 'Syncing your rules...' :
-                                    saveStatus === 'saved' ? 'Your beacon is up to date.' :
-                                        extensionStatus === 'active' ? 'Your beacon is on and guiding the way.' :
-                                            extensionStatus === 'logged_out' ? 'Please log in to the extension to sync rules.' :
-                                                'Please install or reload the extension.'}
+                                {extensionStatus !== 'active' && extensionStatus !== 'loading'
+                                    ? (extensionStatus === 'logged_out'
+                                        ? 'Click the extension icon and log in to sync.'
+                                        : 'Please install or reload the extension.')
+                                    : saveStatus === 'saving' ? 'Syncing your rules...'
+                                        : saveStatus === 'saved' ? 'Your beacon is up to date.'
+                                            : 'Your beacon is on and guiding the way.'}
                             </div>
                         </div>
 
@@ -1274,13 +1688,13 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                             .logo-wrapper:hover .beacon-tooltip {
                                 opacity: 1;
                                 visibility: visible;
-                                transform: translateX(-50%) translateY(0);
+                                transform: translateY(0);
                             }
                             .beacon-tooltip {
                                 position: absolute;
                                 top: 100%; /* Position below the beacon light */
-                                left: 50%;
-                                transform: translateX(-50%) translateY(10px); /* Initial offset for animation */
+                                left: 0;
+                                transform: translateY(10px); /* Initial offset for animation */
                                 background: #1e293b;
                                 color: white;
                                 padding: 8px 12px;
@@ -1303,221 +1717,316 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                     </h1>
                 </div>
 
+
+
                 <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                    {/* Strict Mode Timer - in header for visibility */}
+                    {userSettings.strictModeUntil && userSettings.strictModeUntil > Date.now() && (
+                        <StrictModeTimer
+                            endTime={userSettings.strictModeUntil}
+                            isIndefinite={userSettings.strictModeIndefinite}
+                            onExpire={() => {
+                                setUserSettings(prev => ({ ...prev, strictModeUntil: null, strictMode: false }));
+                            }}
+                            onClick={() => {
+                                setSettingsInitialTab('blocking');
+                                setIsSettingsModalOpen(true);
+                            }}
+                        />
+                    )}
+
+                    {/* Referral Banner - Free until March 1 */}
+                    <ReferralBanner
+                        session={session}
+                        onOpenSubscription={() => {
+                            setSettingsInitialTab('subscription');
+                            setIsSettingsModalOpen(true);
+                        }}
+                    />
+
                     <button
-                        onClick={onRestartTour}
-                        className="help-button"
-                        title="Restart Onboarding Tour"
+                        onClick={() => setIsSettingsModalOpen(true)}
+                        className="settings-button"
+                        id="tour-settings-btn"
+                        title="Settings"
                     >
-                        <span>❓</span> Help
+                        ⚙️
                     </button>
+                    {/* Help button removed - onboarding still auto-plays for first-time users */}
                     <ProfileDropdown
                         userEmail={session.user.email}
                         onSignOut={handleSignOut}
                         onDeleteAccount={() => setIsDeleteModalOpen(true)}
-                        theme={theme}
-                        onThemeChange={onThemeChange}
                     />
                 </div>
                 {/* Save Status Indicator - REMOVED (Replaced by new buttons) */}
             </div>
 
-            <DeleteAccountModal
-                isOpen={isDeleteModalOpen}
-                onClose={() => setIsDeleteModalOpen(false)}
-                onDelete={handleDeleteAccount}
-                loading={isDeletingAccount}
-            />
+            {/* Main Content - Centered with max-width */}
+            <div className="dashboard-main-content">
 
-            <UnloadPresetModal
-                isOpen={isUnloadModalOpen}
-                onClose={() => setIsUnloadModalOpen(false)}
-                onUnload={handleUnloadPreset}
-            />
+                <DeleteAccountModal
+                    isOpen={isDeleteModalOpen}
+                    onClose={() => setIsDeleteModalOpen(false)}
+                    onDelete={handleDeleteAccount}
+                    loading={isDeletingAccount}
+                />
 
-            <form onSubmit={(e) => e.preventDefault()}>
-                <div style={{ marginBottom: '1.5rem' }}>
-                    <div className="beacon-light-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '0.5rem' }}>
-                        <label
-                            htmlFor="tour-main-prompt"
-                            className="main-prompt-label"
-                            style={{ display: 'inline-block' }}
+                <SettingsModal
+                    isOpen={isSettingsModalOpen}
+                    initialTab={settingsInitialTab}
+                    onClose={() => {
+                        setIsSettingsModalOpen(false);
+                        setSettingsInitialTab('analytics'); // Reset
+                    }}
+                    settings={userSettings}
+                    onSave={(newSettings) => {
+                        setUserSettings(newSettings);
+                        localStorage.setItem('beacon_userSettings', JSON.stringify(newSettings));
+                    }}
+                    storageUsage={storageUsage}
+                    userEmail={session.user.email}
+                    session={session}
+                    onDeleteAccount={() => {
+                        setIsSettingsModalOpen(false);
+                        setIsDeleteModalOpen(true);
+                    }}
+                    onRestartTour={onRestartTour}
+                    theme={theme}
+                    onThemeChange={onThemeChange}
+                />
+
+                <UnloadPresetModal
+                    isOpen={isUnloadModalOpen}
+                    onClose={() => setIsUnloadModalOpen(false)}
+                    onUnload={handleUnloadPreset}
+                />
+
+                {/* Blocking Paused Banner */}
+                {userSettings.blockingPaused && (
+                    <div style={{
+                        background: 'rgba(234, 179, 8, 0.15)',
+                        border: '2px solid #eab308',
+                        borderRadius: '12px',
+                        padding: '1rem 1.5rem',
+                        marginBottom: '1.5rem',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        position: 'relative',
+                        zIndex: 2,
+                        boxShadow: '0 4px 12px rgba(234, 179, 8, 0.2)'
+                    }}>
+                        <div>
+                            <h4 style={{ margin: '0 0 4px 0', color: '#ca8a04', fontSize: '1rem' }}>
+                                Blocking is Paused
+                            </h4>
+                            <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                Beacon Blocker is not currently blocking any content. All pages will load normally.
+                            </p>
+                        </div>
+                        <button
+                            onClick={() => {
+                                // Sync to extension FIRST (before state update hides banner)
+                                syncPauseToExtension(false);
+                                setUserSettings(prev => ({ ...prev, blockingPaused: false }));
+                                localStorage.setItem('beacon_userSettings', JSON.stringify({ ...userSettings, blockingPaused: false }));
+                            }}
+                            style={{
+                                padding: '8px 16px',
+                                borderRadius: '6px',
+                                border: 'none',
+                                background: '#22c55e',
+                                color: 'white',
+                                fontWeight: '600',
+                                cursor: 'pointer',
+                                fontSize: '0.85rem',
+                                whiteSpace: 'nowrap'
+                            }}
                         >
-                            Light your beacon and let it guide you.
-                        </label>
-
-                        {/* Validation Notification Area */}
-                        {(saveWarning || overwriteCandidate || pendingLoadPreset) && (
-                            <div className="validation-notification">
-                                {pendingLoadPreset ? (
-                                    <>
-                                        <span className="validation-text">Unsaved changes. Load "{pendingLoadPreset.name}" anyway?</span>
-                                        <div className="validation-actions">
-                                            <button
-                                                className="validation-btn confirm"
-                                                onClick={async () => {
-                                                    const presetToLoad = pendingLoadPreset;
-                                                    setPendingLoadPreset(null);
-                                                    await executeLoadPreset(presetToLoad);
-                                                }}
-                                            >
-                                                Yes
-                                            </button>
-                                            <button
-                                                className="validation-btn cancel"
-                                                onClick={() => setPendingLoadPreset(null)}
-                                            >
-                                                No
-                                            </button>
-                                        </div>
-                                    </>
-                                ) : overwriteCandidate ? (
-                                    <>
-                                        <span className="validation-text">Preset "{overwriteCandidate.name}" exists. Overwrite?</span>
-                                        <div className="validation-actions">
-                                            <button
-                                                className="validation-btn confirm"
-                                                onClick={() => executeSave(newPresetName, overwriteCandidate.id)}
-                                            >
-                                                Yes
-                                            </button>
-                                            <button
-                                                className="validation-btn cancel"
-                                                onClick={() => setOverwriteCandidate(null)}
-                                            >
-                                                No
-                                            </button>
-                                        </div>
-                                    </>
-                                ) : (
-                                    <span className="validation-text">{saveWarning}</span>
-                                )}
-                            </div>
-                        )}
-                    </div>
-
-                    <textarea
-                        id="tour-main-prompt"
-                        name="mainPrompt"
-                        ref={mainPromptRef}
-                        className="main-prompt-textarea"
-                        placeholder={placeholderText}
-                        value={mainPrompt}
-                        onChange={handleTextAreaChange}
-                    />
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginTop: '0.5rem' }}>
-                        <button type="button" className="examples-toggle" style={{ marginTop: 0 }} onClick={() => setShowExamples(!showExamples)}>
-                            {showExamples ? 'Hide Examples' : 'Need inspiration? See Examples'}
+                            Resume
                         </button>
+                    </div>
+                )}
 
-                        <div style={{ width: '1px', height: '20px', background: 'var(--border-color)' }}></div>
+                <form onSubmit={(e) => e.preventDefault()}>
+                    <div style={{ marginBottom: '1.5rem' }}>
+                        <div className="beacon-light-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '0.5rem' }}>
+                            <label
+                                htmlFor="tour-main-prompt"
+                                className="main-prompt-label"
+                                style={{ display: 'inline-block' }}
+                            >
+                                Light your beacon and let it guide you.
+                            </label>
 
-                        <div id="tour-presets-section" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-
-                            {/* --- ACTIVE PRESET SECTION --- */}
-                            {activePreset ? (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                    {isRenamingPreset ? (
-                                        // --- RENAME MODE ---
-                                        <div className="inline-save-container">
-                                            <input
-                                                type="text"
-                                                className="inline-save-input"
-                                                value={renamePresetInput}
-                                                onChange={(e) => setRenamePresetInput(e.target.value)}
-                                                onFocus={(e) => e.target.select()}
-                                                autoFocus
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') handleConfirmRename();
-                                                    if (e.key === 'Escape') handleCancelRename();
-                                                }}
-                                            />
-                                            <button className="inline-action-btn confirm" onClick={handleConfirmRename} title="Save Name">✓</button>
-                                            <button className="inline-action-btn cancel" onClick={handleCancelRename} title="Cancel">✕</button>
-                                        </div>
-                                    ) : (
-                                        // --- ACTIVE PRESET DISPLAY ---
+                            {/* Validation Notification Area */}
+                            {(saveWarning || overwriteCandidate || pendingLoadPreset) && (
+                                <div className="validation-notification">
+                                    {pendingLoadPreset ? (
                                         <>
-                                            <button
-                                                id="tour-update-preset-btn"
-                                                className={`preset-button ${isPresetModified ? 'primary' : 'neutral'}`}
-                                                onClick={isPresetModified ? handleUpdateActivePreset : handleStartRename}
-                                                title={isPresetModified ? "Save changes to this preset" : "Click to rename preset"}
-                                                style={{ minWidth: '100px' }}
-                                            >
-                                                {isPresetModified ? `Save to "${activePreset.name}"` : activePreset.name}
-                                            </button>
-
-                                            {/* UNLOAD BUTTON - Matches Cancel Style */}
-                                            <button
-                                                className="inline-action-btn cancel"
-                                                onClick={() => setIsUnloadModalOpen(true)}
-                                                title="Unload Preset"
-                                                style={{ fontSize: '1rem', width: '28px', height: '28px' }}
-                                            >
-                                                ✕
-                                            </button>
+                                            <span className="validation-text">Current preset has unsynced changes. Load "{pendingLoadPreset.name}" anyway?</span>
+                                            <div className="validation-actions">
+                                                <button
+                                                    className="validation-btn confirm"
+                                                    onClick={async () => {
+                                                        const presetToLoad = pendingLoadPreset;
+                                                        setPendingLoadPreset(null);
+                                                        await executeLoadPreset(presetToLoad);
+                                                    }}
+                                                >
+                                                    Yes
+                                                </button>
+                                                <button
+                                                    className="validation-btn cancel"
+                                                    onClick={() => setPendingLoadPreset(null)}
+                                                >
+                                                    No
+                                                </button>
+                                            </div>
                                         </>
+                                    ) : overwriteCandidate ? (
+                                        <>
+                                            <span className="validation-text">Preset "{overwriteCandidate.name}" exists. Overwrite?</span>
+                                            <div className="validation-actions">
+                                                <button
+                                                    className="validation-btn confirm"
+                                                    onClick={() => executeSave(newPresetName, overwriteCandidate.id)}
+                                                >
+                                                    Yes
+                                                </button>
+                                                <button
+                                                    className="validation-btn cancel"
+                                                    onClick={() => setOverwriteCandidate(null)}
+                                                >
+                                                    No
+                                                </button>
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <span className="validation-text">{saveWarning}</span>
                                     )}
                                 </div>
-                            ) : (
-                                // Show disabled "Save To" button when no preset is loaded
+                            )}
+                        </div>
+
+                        <textarea
+                            id="tour-main-prompt"
+                            name="mainPrompt"
+                            ref={mainPromptRef}
+                            className={`main-prompt-textarea ${isStrictModeActive ? 'strict-mode-locked' : ''}`}
+                            placeholder={isStrictModeActive ? "Strict Mode is active. Focus rules are locked." : placeholderText}
+                            value={mainPrompt}
+                            onChange={handleTextAreaChange}
+                            disabled={isStrictModeActive}
+                        />
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginTop: '0.5rem' }}>
+                            {(() => {
+                                const isDisconnected = extensionStatus !== 'active' && extensionStatus !== 'loading';
+                                const dotColor = isDisconnected ? '#ef4444' : saveStatus === 'saving' ? '#eab308' : '#22c55e';
+                                const textColor = isDisconnected ? '#ef4444' : saveStatus === 'saving' ? '#eab308' : 'var(--text-secondary)';
+                                const label = isDisconnected ? 'Extension disconnected' : saveStatus === 'saving' ? 'Syncing...' : 'Auto-synced';
+                                return (
+                                    <span style={{
+                                        fontSize: '0.7rem',
+                                        color: textColor,
+                                        opacity: 0.7,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '4px',
+                                        whiteSpace: 'nowrap',
+                                    }}>
+                                        <span style={{
+                                            width: '6px', height: '6px', borderRadius: '50%',
+                                            backgroundColor: dotColor,
+                                            display: 'inline-block',
+                                            transition: 'background-color 0.3s ease',
+                                        }} />
+                                        {label}
+                                    </span>
+                                );
+                            })()}
+
+                            <div style={{ width: '1px', height: '16px', background: 'var(--border-color)' }}></div>
+
+                            <button type="button" className="examples-toggle" style={{ marginTop: 0 }} onClick={() => setShowExamples(!showExamples)}>
+                                {showExamples ? 'Hide Examples' : 'Need inspiration? See Examples'}
+                            </button>
+
+                            <div style={{ width: '1px', height: '20px', background: 'var(--border-color)' }}></div>
+
+                            <div id="tour-presets-section" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+
+                                {/* --- UPDATE PRESET BUTTON --- */}
                                 <button
                                     id="tour-update-preset-btn"
-                                    className="preset-button neutral"
-                                    disabled
-                                    title="Load a preset to enable this button"
-                                    style={{ minWidth: '100px', opacity: 0.5, cursor: 'not-allowed' }}
+                                    className={`preset-button ${activePreset && isPresetModified ? 'primary' : 'neutral'}`}
+                                    onClick={activePreset && isPresetModified ? handleUpdateActivePreset : undefined}
+                                    disabled={!activePreset || !isPresetModified}
+                                    title={
+                                        !activePreset
+                                            ? "Load a preset to enable updating"
+                                            : isPresetModified
+                                                ? `Update preset "${activePreset.name}"`
+                                                : "No changes to update"
+                                    }
+                                    style={{
+                                        minWidth: '70px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        opacity: (!activePreset || !isPresetModified || isStrictModeActive) ? 0.5 : 1,
+                                        cursor: (!activePreset || !isPresetModified || isStrictModeActive) ? 'not-allowed' : 'pointer'
+                                    }}
                                 >
-                                    Save To (None)
+                                    Update
                                 </button>
-                            )}
 
-                            {/* --- SAVE AS BUTTON --- */}
-                            {isSavingPreset ? (
-                                <div className="inline-save-container">
-                                    <input
-                                        type="text"
-                                        className="inline-save-input"
-                                        value={newPresetName}
-                                        onChange={(e) => {
-                                            setNewPresetName(e.target.value);
-                                            setSaveWarning(null);
-                                            setOverwriteCandidate(null);
-                                        }}
-                                        onFocus={(e) => e.target.select()}
-                                        autoFocus
-                                        placeholder="Preset Name"
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter') handleConfirmSavePreset();
-                                            if (e.key === 'Escape') handleCancelSavePreset();
-                                        }}
-                                    />
-                                    <button className="inline-action-btn confirm" onClick={handleConfirmSavePreset} title="Save">✓</button>
-                                    <button className="inline-action-btn cancel" onClick={handleCancelSavePreset} title="Cancel">✕</button>
-                                </div>
-                            ) : (
+                                {/* --- SAVE AS BUTTON --- */}
+                                {isSavingPreset ? (
+                                    <div className="inline-save-container">
+                                        <input
+                                            type="text"
+                                            className="inline-save-input"
+                                            value={newPresetName}
+                                            onChange={(e) => {
+                                                setNewPresetName(e.target.value);
+                                                setSaveWarning(null);
+                                                setOverwriteCandidate(null);
+                                            }}
+                                            onFocus={(e) => e.target.select()}
+                                            autoFocus
+                                            placeholder="Preset Name"
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') handleConfirmSavePreset();
+                                                if (e.key === 'Escape') handleCancelSavePreset();
+                                            }}
+                                        />
+                                        <button className="inline-action-btn confirm" onClick={handleConfirmSavePreset} title="Save">✓</button>
+                                        <button className="inline-action-btn cancel" onClick={handleCancelSavePreset} title="Cancel">✕</button>
+                                    </div>
+                                ) : (
+                                    <button
+                                        id="tour-save-preset-btn"
+                                        className="preset-button"
+                                        onClick={handleStartSavePreset}
+                                    >
+                                        New Preset
+                                    </button>
+                                )}
+
+                                {/* --- LOAD BUTTON --- */}
                                 <button
-                                    id="tour-save-preset-btn"
+                                    id="tour-load-preset-btn"
                                     className="preset-button"
-                                    onClick={handleStartSavePreset}
+                                    onClick={() => setIsPresetsModalOpen(true)}
                                 >
-                                    Save As
+                                    Load
                                 </button>
-                            )}
-
-                            {/* --- LOAD BUTTON --- */}
-                            <button
-                                id="tour-load-preset-btn"
-                                className="preset-button"
-                                onClick={() => setIsPresetsModalOpen(true)}
-                            >
-                                Load
-                            </button>
+                            </div>
                         </div>
-                    </div>
-                    <style>{`
+                        <style>{`
                         @keyframes pulse {
                             0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
                             70% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
@@ -1537,416 +2046,449 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                         }
                     `}</style>
 
-                    {showExamples && (
-                        <div className="examples-content">
-                            <div className="example-item">
-                                <span className="example-label">Smart Video Filter:</span>
-                                "I am learning to cook. Allow YouTube videos about <strong>cooking recipes</strong>, but block all other entertainment and gaming videos."
+                        {showExamples && (
+                            <div className="examples-content">
+                                <p style={{ fontSize: '0.8rem', opacity: 0.6, marginBottom: '8px', lineHeight: 1.4 }}>
+                                    Your Beacon evaluates each page you visit by its URL and title. Use it for nuanced rules. For simple site blocking, try the <strong>Categories</strong> or <strong>Allow/Block Lists</strong> below.
+                                </p>
+                                <div className="example-item">
+                                    <span className="example-label">Smart Filter:</span>
+                                    "Allow <strong>educational YouTube</strong> videos about coding and science. Block entertainment, drama, and shorts."
+                                </div>
+                                <div className="example-item">
+                                    <span className="example-label">Goal-Based:</span>
+                                    "I'm planning a vacation. Allow <strong>travel and hotel sites</strong> but block social media and news."
+                                </div>
+                                <div className="example-item">
+                                    <span className="example-label">Timer-Based:</span>
+                                    "Block all social media <strong>for 2 hours</strong> so I can focus on my assignment."
+                                </div>
+                                <div className="example-item">
+                                    <span className="example-label">Schedule-Based:</span>
+                                    "Block Reddit and Twitter <strong>until 5 PM</strong> when my workday ends."
+                                </div>
+                                <div className="example-item">
+                                    <span className="example-label">Content Safety:</span>
+                                    "Block any website with <strong>explicit, violent, or adult content</strong>."
+                                </div>
+                                <div className="example-item">
+                                    <span className="example-label">Total Lockdown:</span>
+                                    "Block <strong>everything except Gmail and Google Docs</strong> — I have a deadline in 1 hour."
+                                </div>
                             </div>
-                            <div className="example-item">
-                                <span className="example-label">Productive Social:</span>
-                                "I need to sell items. Allow <strong>Facebook Marketplace</strong> for listing items, but block the <strong>News Feed</strong> to avoid distractions."
-                            </div>
-                            <div className="example-item">
-                                <span className="example-label">Strict Deadline:</span>
-                                "I have a paper due in 1 hour. Block <strong>the entire internet</strong> except for Google Docs and Wikipedia."
-                            </div>
-                            <div className="example-item">
-                                <span className="example-label">Coding Mode:</span>
-                                "I'm building a website. Block social media, but allow <strong>Stack Overflow, GitHub, and YouTube tutorials about React</strong>."
+                        )}
+                    </div>
+
+
+
+                    {/* --- Collapsible Additional Controls --- */}
+                    <div style={helperSectionStyles} id="tour-additional-controls">
+                        <div
+                            className={`helpers-header ${showHelpers ? 'active' : ''}`}
+                            onClick={() => setShowHelpers(!showHelpers)}
+                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                        >
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                <h3 style={{ margin: 0, display: 'flex', alignItems: 'center' }}>
+                                    <span className="toggle-icon" style={{ marginRight: '8px' }}>{showHelpers ? '▼' : '▶'}</span>
+                                    Additional Controls
+                                </h3>
+                                <p style={{ margin: '4px 0 0 24px', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 'normal' }}>
+                                    Advanced controls to fine-tune your Beacon
+                                </p>
                             </div>
                         </div>
-                    )}
-                </div>
 
+                        {showHelpers && (
+                            <div className="helpers-content">
+                                <fieldset style={{ border: 'none', padding: '0', margin: '1.5rem 0' }}>
+                                    <legend style={{ fontWeight: '700', fontSize: '1.2rem', marginBottom: '1rem', color: 'var(--text-primary)' }}>
+                                        Quick Block Categories
+                                    </legend>
+                                    <div className="category-grid" id="tour-categories">
+                                        {BLOCKED_CATEGORIES.map((category) => (
+                                            <div key={category.id} className={`category-card ${blockedCategories[category.id] ? 'active' : ''} ${isStrictModeActive ? 'locked' : ''}`}
+                                                onClick={() => {
+                                                    if (isStrictModeActive) return;
+                                                    handleCategoryChange({ target: { name: category.id, checked: !blockedCategories[category.id] } })
+                                                }}>
+                                                <div className="category-header">
+                                                    <div className="category-info">
+                                                        <span className="category-label">{category.label}</span>
+                                                        <span className="category-desc">{category.desc}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </fieldset>
 
+                                <div className="lists-container" id="tour-lists">
+                                    {/* --- Always Allow (White List) --- */}
+                                    <div className={`list-section whitelist-section ${isStrictModeActive ? 'locked' : ''}`}>
+                                        <div className="list-header">
+                                            <div>
+                                                <h4>Always Allow</h4>
+                                                <p>Websites in this list will <strong>bypass</strong> all blocking rules.</p>
+                                            </div>
+                                            {allowListArray.length > 0 && (
+                                                <button type="button"
+                                                    className={`clear-list-button ${clearConfirmation === 'allow' ? 'confirming' : ''}`}
+                                                    onClick={() => handleClearList('allow')}
+                                                    disabled={isStrictModeActive}
+                                                    style={isStrictModeActive ? { opacity: 0.5, cursor: 'not-allowed' } : {}}>
+                                                    {clearConfirmation === 'allow' ? 'Are you sure?' : 'Clear All'}
+                                                </button>
+                                            )}
+                                        </div>
+                                        <div className="tag-input-wrapper">
+                                            <input type="text" id="allowInput" className="tag-input-field"
+                                                placeholder={isStrictModeActive ? "Locked during Strict Mode" : "example.com"}
+                                                autoComplete="off"
+                                                value={currentAllowInput}
+                                                onChange={(e) => { setCurrentAllowInput(e.target.value); setInputError({ type: null, msg: null }); }}
+                                                onKeyDown={(e) => handleInputKeyDown(e, 'allow')}
+                                                disabled={isStrictModeActive}
+                                                style={isStrictModeActive ? { opacity: 0.6, cursor: 'not-allowed' } : {}} />
+                                            <button type="button" className="tag-input-button" onClick={() => handleAddDomain('allow')}
+                                                disabled={isStrictModeActive}
+                                                style={isStrictModeActive ? { opacity: 0.5, cursor: 'not-allowed' } : {}}>Add</button>
+                                        </div>
+                                        {inputError.type === 'allow' && <div className="input-error-msg">{inputError.msg}</div>}
+                                        <div className="tag-list">
+                                            {allowListArray.map((domain) => (
+                                                <span key={domain} className="tag-item allow-tag">
+                                                    {domain}
+                                                    <button type="button" className="tag-remove-button"
+                                                        onClick={() => handleRemoveDomain('allow', domain)} aria-label={`Remove ${domain}`}
+                                                        disabled={isStrictModeActive}
+                                                        style={isStrictModeActive ? { opacity: 0.3, cursor: 'not-allowed' } : {}}>&times;</button>
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
 
-                {/* --- Collapsible Additional Controls --- */}
-                <div style={helperSectionStyles} id="tour-additional-controls">
+                                    {/* --- Always Block (Black List) --- */}
+                                    <div className={`list-section blacklist-section ${isStrictModeActive ? 'locked' : ''}`}>
+                                        <div className="list-header">
+                                            <div>
+                                                <h4>Always Block</h4>
+                                                <p>Websites in this list will be <strong>blocked</strong> regardless of your goal.</p>
+                                            </div>
+                                            {blockListArray.length > 0 && (
+                                                <button type="button"
+                                                    className={`clear-list-button ${clearConfirmation === 'block' ? 'confirming' : ''}`}
+                                                    onClick={() => handleClearList('block')}
+                                                    disabled={isStrictModeActive}
+                                                    style={isStrictModeActive ? { opacity: 0.5, cursor: 'not-allowed' } : {}}>
+                                                    {clearConfirmation === 'block' ? 'Are you sure?' : 'Clear All'}
+                                                </button>
+                                            )}
+                                        </div>
+                                        <div className="tag-input-wrapper">
+                                            <input type="text" id="blockInput" className="tag-input-field"
+                                                placeholder={isStrictModeActive ? "Locked during Strict Mode" : "example.com"}
+                                                autoComplete="off"
+                                                value={currentBlockInput}
+                                                onChange={(e) => { setCurrentBlockInput(e.target.value); setInputError({ type: null, msg: null }); }}
+                                                onKeyDown={(e) => handleInputKeyDown(e, 'block')}
+                                                disabled={isStrictModeActive}
+                                                style={isStrictModeActive ? { opacity: 0.6, cursor: 'not-allowed' } : {}} />
+                                            <button type="button" className="tag-input-button" onClick={() => handleAddDomain('block')}
+                                                disabled={isStrictModeActive}
+                                                style={isStrictModeActive ? { opacity: 0.5, cursor: 'not-allowed' } : {}}>Add</button>
+                                        </div>
+                                        {inputError.type === 'block' && <div className="input-error-msg">{inputError.msg}</div>}
+                                        <div className="tag-list">
+                                            {blockListArray.map((domain) => (
+                                                <span key={domain} className="tag-item block-tag">
+                                                    {domain}
+                                                    <button type="button" className="tag-remove-button"
+                                                        onClick={() => handleRemoveDomain('block', domain)} aria-label={`Remove ${domain}`}
+                                                        disabled={isStrictModeActive}
+                                                        style={isStrictModeActive ? { opacity: 0.3, cursor: 'not-allowed' } : {}}>&times;</button>
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </form>
+
+                {/* --- LOG FEED SECTION --- */}
+                <div style={{ marginTop: '2rem' }} id="tour-recent-activity-container">
+                    {/* --- RECENT ACTIVITY --- */}
                     <div
-                        className={`helpers-header ${showHelpers ? 'active' : ''}`}
-                        onClick={() => setShowHelpers(!showHelpers)}
-                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                        className={`helpers-header ${showLogs ? 'active' : ''} recent-activity-section`}
+                        id="tour-recent-activity"
+                        onClick={() => setShowLogs(!showLogs)}
+                        style={{
+                            marginBottom: showLogs ? '1.5rem' : '0',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center'
+                        }}
                     >
                         <div style={{ display: 'flex', flexDirection: 'column' }}>
                             <h3 style={{ margin: 0, display: 'flex', alignItems: 'center' }}>
-                                <span className="toggle-icon" style={{ marginRight: '8px' }}>{showHelpers ? '▼' : '▶'}</span>
-                                Additional Controls
+                                <span
+                                    className="toggle-icon"
+                                    style={{
+                                        marginRight: '8px'
+                                    }}
+                                >
+                                    {showLogs ? '▼' : '▶'}
+                                </span>
+                                Browsing Activity
                             </h3>
-                            <p style={{ margin: '4px 0 0 24px', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 'normal' }}>
-                                Advanced controls to fine-tune your Beacon.
-                            </p>
+                            <p style={{ margin: '4px 0 0 24px', color: '#64748b', fontSize: '0.9rem' }}>Sites checked by Beacon</p>
                         </div>
                     </div>
 
-                    {showHelpers && (
-                        <div className="helpers-content">
-                            <fieldset style={{ border: 'none', padding: '0', margin: '1.5rem 0' }}>
-                                <legend style={{ fontWeight: '700', fontSize: '1.2rem', marginBottom: '1rem', color: 'var(--text-primary)' }}>
-                                    Quick Block Categories
-                                </legend>
-                                <div className="category-grid" id="tour-categories">
-                                    {BLOCKED_CATEGORIES.map((category) => (
-                                        <div key={category.id} className={`category-card ${blockedCategories[category.id] ? 'active' : ''}`}
-                                            onClick={() => handleCategoryChange({ target: { name: category.id, checked: !blockedCategories[category.id] } })}>
-                                            <div className="category-header">
-                                                <div className="category-info">
-                                                    <span className="category-label">{category.label}</span>
-                                                    <span className="category-desc">{category.desc}</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </fieldset>
 
-                            <div className="lists-container" id="tour-lists">
-                                {/* --- Always Allow (White List) --- */}
-                                <div className="list-section whitelist-section">
-                                    <div className="list-header">
-                                        <div>
-                                            <h4>Always Allow</h4>
-                                            <p>Websites in this list will <strong>bypass</strong> all blocking rules.</p>
-                                        </div>
-                                        {allowListArray.length > 0 && (
-                                            <button type="button"
-                                                className={`clear-list-button ${clearConfirmation === 'allow' ? 'confirming' : ''}`}
-                                                onClick={() => handleClearList('allow')}>
-                                                {clearConfirmation === 'allow' ? 'Are you sure?' : 'Clear All'}
-                                            </button>
-                                        )}
-                                    </div>
-                                    <div className="tag-input-wrapper">
-                                        <input type="text" id="allowInput" className="tag-input-field"
-                                            placeholder="example.com"
-                                            autoComplete="off"
-                                            value={currentAllowInput}
-                                            onChange={(e) => { setCurrentAllowInput(e.target.value); setInputError({ type: null, msg: null }); }}
-                                            onKeyDown={(e) => handleInputKeyDown(e, 'allow')} />
-                                        <button type="button" className="tag-input-button" onClick={() => handleAddDomain('allow')}>Add</button>
-                                    </div>
-                                    {inputError.type === 'allow' && <div className="input-error-msg">{inputError.msg}</div>}
-                                    <div className="tag-list">
-                                        {allowListArray.map((domain) => (
-                                            <span key={domain} className="tag-item allow-tag">
-                                                {domain}
-                                                <button type="button" className="tag-remove-button"
-                                                    onClick={() => handleRemoveDomain('allow', domain)} aria-label={`Remove ${domain}`}>&times;</button>
-                                            </span>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                {/* --- Always Block (Black List) --- */}
-                                <div className="list-section blacklist-section">
-                                    <div className="list-header">
-                                        <div>
-                                            <h4>Always Block</h4>
-                                            <p>Websites in this list will be <strong>blocked</strong> regardless of your goal.</p>
-                                        </div>
-                                        {blockListArray.length > 0 && (
-                                            <button type="button"
-                                                className={`clear-list-button ${clearConfirmation === 'block' ? 'confirming' : ''}`}
-                                                onClick={() => handleClearList('block')}>
-                                                {clearConfirmation === 'block' ? 'Are you sure?' : 'Clear All'}
-                                            </button>
-                                        )}
-                                    </div>
-                                    <div className="tag-input-wrapper">
-                                        <input type="text" id="blockInput" className="tag-input-field"
-                                            placeholder="example.com"
-                                            autoComplete="off"
-                                            value={currentBlockInput}
-                                            onChange={(e) => { setCurrentBlockInput(e.target.value); setInputError({ type: null, msg: null }); }}
-                                            onKeyDown={(e) => handleInputKeyDown(e, 'block')} />
-                                        <button type="button" className="tag-input-button" onClick={() => handleAddDomain('block')}>Add</button>
-                                    </div>
-                                    {inputError.type === 'block' && <div className="input-error-msg">{inputError.msg}</div>}
-                                    <div className="tag-list">
-                                        {blockListArray.map((domain) => (
-                                            <span key={domain} className="tag-item block-tag">
-                                                {domain}
-                                                <button type="button" className="tag-remove-button"
-                                                    onClick={() => handleRemoveDomain('block', domain)} aria-label={`Remove ${domain}`}>&times;</button>
-                                            </span>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </form>
-
-            {/* --- LOG FEED SECTION --- */}
-            <div style={{ marginTop: '2rem' }} id="tour-recent-activity-container">
-                {/* --- RECENT ACTIVITY --- */}
-                <div
-                    className={`helpers-header ${showLogs ? 'active' : ''} recent-activity-section`}
-                    id="tour-recent-activity"
-                    onClick={() => setShowLogs(!showLogs)}
-                    style={{
-                        marginBottom: showLogs ? '1.5rem' : '0',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center'
-                    }}
-                >
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                        <h3 style={{ margin: 0, display: 'flex', alignItems: 'center' }}>
-                            <span
-                                className="toggle-icon"
-                                style={{
-                                    marginRight: '8px'
-                                }}
-                            >
-                                {showLogs ? '▼' : '▶'}
-                            </span>
-                            Recent Activity
-                        </h3>
-                        <p style={{ margin: '4px 0 0 24px', color: '#64748b', fontSize: '0.9rem' }}>See what's been blocked recently.</p>
-                    </div>
 
                     {showLogs && (
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                const icon = e.currentTarget.querySelector('svg');
-                                icon.style.transition = 'transform 0.5s ease';
-                                icon.style.transform = 'rotate(360deg)';
-                                fetchLogs().then(() => {
-                                    setTimeout(() => {
-                                        icon.style.transition = 'none';
-                                        icon.style.transform = 'rotate(0deg)';
-                                    }, 500);
-                                });
-                            }}
-                            className="refresh-button"
-                            title="Reload logs from extension (doesn't clear history)"
-                            style={{
-                                background: 'transparent',
-                                border: '1px solid #e2e8f0',
-                                borderRadius: '6px',
-                                padding: '6px 10px',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '6px',
-                                color: '#64748b',
-                                fontSize: '0.85rem',
-                                transition: 'all 0.3s ease'
-                            }}
-                            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--hover-bg, #f1f5f9)'; e.currentTarget.style.color = 'var(--text-primary, #334155)'; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary, #64748b)'; }}
-                        >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3" />
-                            </svg>
-                            Refresh
-                        </button>
-                    )}
-                </div>
+                        <div className="log-feed-container">
+                            {logs.length === 0 ? (
+                                <div className="empty-logs" id="tour-recent-activity-item-0">
+                                    <span style={{ fontSize: '2rem', marginBottom: '0.5rem', display: 'block' }}>🌊</span>
+                                    <p>No activity recorded yet.</p>
+                                    <small>Browse the web to see your Beacon in action.</small>
+                                </div>
+                            ) : (
+                                <>
+                                    <ul className="log-feed-list">
+                                        {logs.slice(0, 5).map((log, index) => {
+                                            // Detect log types
+                                            const isCache = log.reason && log.reason.toLowerCase().includes('cached decision');
+                                            const isSystemReset = log.url && log.url.includes('system-reset');
+                                            const isAllowDecision = log.decision === 'ALLOW';
 
+                                            // Reason text logic
+                                            let mainReason = log.reason || 'Blocked';
+                                            let expandedReason = log.reason || 'Blocked';
 
-
-                {showLogs && (
-                    <div className="log-feed-container">
-                        {logs.length === 0 ? (
-                            <div className="empty-logs" id="tour-recent-activity-item-0">
-                                <span style={{ fontSize: '2rem', marginBottom: '0.5rem', display: 'block' }}>🌊</span>
-                                <p>No activity recorded yet.</p>
-                                <small>Browse the web to see your Beacon in action.</small>
-                            </div>
-                        ) : (
-                            <>
-                                <ul className="log-feed-list">
-                                    {logs.slice(0, 5).map((log, index) => {
-                                        // All logs are now blocks (no ALLOW logs)
-                                        const isCache = log.reason && log.reason.toLowerCase().includes('cached decision');
-                                        const isSystemReset = log.url && log.url.includes('system-reset');
-
-                                        // Reason text logic
-                                        let mainReason = log.reason || 'Blocked';
-                                        let expandedReason = log.reason || 'Blocked';
-
-                                        if (isSystemReset) {
-                                            mainReason = "System Action";
-                                        } else if (isCache) {
-                                            mainReason = "Cached decision";
-                                            expandedReason = "Previously evaluated";
-                                        }
-                                        // Helper to get brand style
-                                        const getLogStyle = (domain) => {
-                                            const baseDomain = domain.split('.').slice(-2).join('.');
-                                            return BRAND_COLORS[domain] || BRAND_COLORS[baseDomain];
-                                        };
-
-                                        let itemStyle = {};
-                                        if (isSystemReset) {
-                                            itemStyle = { backgroundColor: SYSTEM_RESET_STYLE.bg, borderColor: SYSTEM_RESET_STYLE.border };
-                                        } else {
-                                            const brandStyle = getLogStyle(log.domain);
-                                            if (brandStyle) {
-                                                itemStyle = { backgroundColor: brandStyle.bg, borderColor: brandStyle.border };
+                                            if (isSystemReset) {
+                                                mainReason = "System Action";
+                                            } else if (isCache) {
+                                                // Extract original reason from "Cached decision · Reason" format
+                                                const cachedParts = log.reason.split(' · ');
+                                                const originalReason = cachedParts.length > 1 ? cachedParts.slice(1).join(' · ') : null;
+                                                mainReason = originalReason ? `Cached · ${originalReason}` : "Cached decision";
+                                                expandedReason = originalReason || "Previously evaluated";
                                             }
-                                        }
+                                            // Helper to get brand style
+                                            const getLogStyle = (domain) => {
+                                                const baseDomain = domain.split('.').slice(-2).join('.');
+                                                return BRAND_COLORS[domain] || BRAND_COLORS[baseDomain];
+                                            };
 
-                                        return (
-                                            <li
-                                                key={log.id}
-                                                id={index === 0 ? 'tour-recent-activity-item-0' : undefined}
-                                                className="log-item"
-                                                onClick={() => setExpandedLogId(expandedLogId === log.id ? null : log.id)}
-                                                style={{
-                                                    cursor: 'pointer',
-                                                    flexDirection: 'column',
-                                                    alignItems: 'stretch',
-                                                    ...itemStyle
-                                                }}
-                                            >
-                                                <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-                                                    <div className="log-icon">
-                                                        {isSystemReset ? (
-                                                            <div style={{
-                                                                width: '24px', height: '24px', borderRadius: '4px',
-                                                                background: '#dbeafe', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                                color: '#2563eb'
-                                                            }}>
-                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                                                    <polyline points="23 4 23 10 17 10"></polyline>
-                                                                    <polyline points="1 20 1 14 7 14"></polyline>
-                                                                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-                                                                </svg>
-                                                            </div>
-                                                        ) : isCache ? (
-                                                            <div style={{
-                                                                width: '24px', height: '24px', borderRadius: '4px',
-                                                                background: '#fef3c7', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                                color: '#d97706'
-                                                            }}>
-                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                                                    <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
-                                                                    <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
-                                                                    <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
-                                                                </svg>
-                                                            </div>
-                                                        ) : (
-                                                            <img
-                                                                src={getFaviconUrl(log.domain)}
-                                                                alt=""
-                                                                style={{ width: '24px', height: '24px', borderRadius: '4px' }}
-                                                                onError={(e) => { e.target.onerror = null; e.target.src = 'https://www.google.com/s2/favicons?domain=example.com'; }}
-                                                            />
-                                                        )}
-                                                    </div>
-                                                    <div className="log-details" style={{ minWidth: 0 }}>
-                                                        <span className="log-url" title={log.url} style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                                            {log.page_title || log.domain || 'Unknown Page'}
-                                                        </span>
-                                                        <span className="log-meta" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                            <span>
-                                                                {(() => {
-                                                                    const date = new Date(log.created_at);
-                                                                    const now = new Date();
-                                                                    const isToday = date.getDate() === now.getDate() &&
-                                                                        date.getMonth() === now.getMonth() &&
-                                                                        date.getFullYear() === now.getFullYear();
-                                                                    const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                                                                    return isToday ? timeStr : `${date.toLocaleDateString()} • ${timeStr}`;
-                                                                })()}
+                                            let itemStyle = {};
+                                            // 1. System Reset (Highest Priority)
+                                            if (isSystemReset) {
+                                                itemStyle = { backgroundColor: SYSTEM_RESET_STYLE.bg, borderColor: SYSTEM_RESET_STYLE.border };
+                                            }
+                                            // 2. Cached decisions - yellow accent
+                                            else if (isCache) {
+                                                itemStyle = {
+                                                    borderLeft: '3px solid #eab308',
+                                                    backgroundColor: 'rgba(234, 179, 8, 0.06)',
+                                                };
+                                            }
+                                            // 3. Brand colors for known domains
+                                            else {
+                                                const brandStyle = getLogStyle(log.domain);
+                                                if (brandStyle) {
+                                                    itemStyle = {
+                                                        backgroundColor: brandStyle.bg,
+                                                        borderColor: brandStyle.border,
+                                                    };
+                                                }
+                                            }
+
+                                            return (
+                                                <li
+                                                    key={log.id}
+                                                    id={index === 0 ? 'tour-recent-activity-item-0' : undefined}
+                                                    className="log-item"
+                                                    onClick={() => setExpandedLogId(expandedLogId === log.id ? null : log.id)}
+                                                    style={{
+                                                        cursor: 'pointer',
+                                                        flexDirection: 'column',
+                                                        alignItems: 'stretch',
+                                                        ...itemStyle
+                                                    }}
+                                                >
+                                                    <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+                                                        <div className="log-icon">
+                                                            {isSystemReset ? (
+                                                                <div style={{
+                                                                    width: '24px', height: '24px', borderRadius: '4px',
+                                                                    background: '#dbeafe', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                                    color: '#2563eb'
+                                                                }}>
+                                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                                        <polyline points="23 4 23 10 17 10"></polyline>
+                                                                        <polyline points="1 20 1 14 7 14"></polyline>
+                                                                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                                                                    </svg>
+                                                                </div>
+                                                            ) : isCache ? (
+                                                                <div style={{
+                                                                    width: '24px', height: '24px', borderRadius: '4px',
+                                                                    background: '#fef3c7', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                                    color: '#d97706'
+                                                                }}>
+                                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                                        <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                                                                        <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+                                                                        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                                                                    </svg>
+                                                                </div>
+                                                            ) : (
+                                                                <img
+                                                                    src={getFaviconUrl(log.domain)}
+                                                                    alt=""
+                                                                    style={{ width: '24px', height: '24px', borderRadius: '4px' }}
+                                                                    onError={(e) => { e.target.onerror = null; e.target.src = 'https://www.google.com/s2/favicons?domain=example.com'; }}
+                                                                />
+                                                            )}
+                                                        </div>
+                                                        <div className="log-details" style={{ minWidth: 0 }}>
+                                                            <span className="log-url" title={log.url} style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                                {log.page_title || log.domain || 'Unknown Page'}
                                                             </span>
-                                                        </span>
-                                                        <span className="log-reason" title={mainReason} style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '0.8rem', marginTop: '2px' }}>
-                                                            {mainReason}
-                                                        </span>
+                                                            <span className="log-meta" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                                <span>
+                                                                    {(() => {
+                                                                        const date = new Date(log.created_at);
+                                                                        const now = new Date();
+                                                                        const isToday = date.getDate() === now.getDate() &&
+                                                                            date.getMonth() === now.getMonth() &&
+                                                                            date.getFullYear() === now.getFullYear();
+                                                                        const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                                                        return isToday ? timeStr : `${date.toLocaleDateString()} • ${timeStr}`;
+                                                                    })()}
+                                                                </span>
+                                                            </span>
+                                                            <span className="log-reason" title={mainReason} style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '0.8rem', marginTop: '2px' }}>
+                                                                {mainReason}
+                                                            </span>
+                                                        </div>
+                                                        {!isSystemReset && userSettings?.logAllowDecisions && (
+                                                            <div style={{
+                                                                marginLeft: 'auto',
+                                                                padding: '0.2rem 0.5rem',
+                                                                borderRadius: '4px',
+                                                                fontSize: '0.65rem',
+                                                                fontWeight: '600',
+                                                                textTransform: 'uppercase',
+                                                                letterSpacing: '0.5px',
+                                                                backgroundColor: isAllowDecision ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                                                                color: isAllowDecision ? '#16a34a' : '#dc2626',
+                                                                whiteSpace: 'nowrap',
+                                                            }}>
+                                                                {isAllowDecision ? 'Allowed' : 'Blocked'}
+                                                            </div>
+                                                        )}
                                                     </div>
-                                                    {/* Decision badge removed - all logs are blocks now */}
-                                                </div>
 
-                                                {expandedLogId === log.id && (
-                                                    <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', fontSize: '0.9rem', color: 'var(--text-primary)' }}>
-                                                        {!isSystemReset && (
-                                                            <p style={{ display: 'flex', alignItems: 'baseline', gap: '0.25rem' }}><strong>URL:</strong> <a href={log.url} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '400px', display: 'inline-block' }}>{log.url}</a></p>
-                                                        )}
-                                                        <p><strong>Reason:</strong> {expandedReason}</p>
-                                                        {log.active_prompt && (
-                                                            <p><strong>Instructions:</strong> "{log.active_prompt}"</p>
-                                                        )}
-                                                        <p><strong>Time:</strong> {new Date(log.created_at).toLocaleString()}</p>
-
-                                                        {/* Feature: Link to history for Domain or Prompt */}
-                                                        <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
-                                                            <button
-                                                                className="history-link-button"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    if (onOpenHistoryWithSearch) onOpenHistoryWithSearch(log.domain);
-                                                                }}
-                                                            >
-                                                                View all from {log.domain}
-                                                            </button>
+                                                    {expandedLogId === log.id && (
+                                                        <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                                                            {!isSystemReset && (
+                                                                <p style={{ display: 'flex', alignItems: 'baseline', gap: '0.25rem' }}><strong>URL:</strong> <a href={log.url} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '400px', display: 'inline-block' }}>{log.url}</a></p>
+                                                            )}
+                                                            <p><strong>Reason:</strong> {expandedReason}</p>
                                                             {log.active_prompt && (
+                                                                <p><strong>Instructions:</strong> "{log.active_prompt}"</p>
+                                                            )}
+                                                            <p><strong>Time:</strong> {new Date(log.created_at).toLocaleString()}</p>
+
+                                                            {/* Feature: Link to history for Domain or Prompt */}
+                                                            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
                                                                 <button
                                                                     className="history-link-button"
                                                                     onClick={(e) => {
                                                                         e.stopPropagation();
-                                                                        if (onOpenHistoryWithSearch) onOpenHistoryWithSearch(log.active_prompt);
+                                                                        if (onOpenHistoryWithSearch) onOpenHistoryWithSearch(log.domain);
                                                                     }}
-                                                                    title={`Filter by: "${log.active_prompt}"`}
                                                                 >
-                                                                    View all with this prompt
+                                                                    View all from {log.domain}
                                                                 </button>
-                                                            )}
-                                                            <button
-                                                                className="history-link-button"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    const timestamp = parseInt(log.id.split('-')[1]);
-                                                                    handleDeleteFromRecent(log.id, timestamp);
-                                                                }}
-                                                                style={logDeleteConfirmId === log.id ? {
-                                                                    color: '#fff',
-                                                                    borderColor: '#dc2626',
-                                                                    backgroundColor: '#dc2626'
-                                                                } : {}}
-                                                            >
-                                                                {logDeleteConfirmId === log.id ? 'Confirm Delete?' : 'Delete Entry'}
-                                                            </button>
+                                                                {log.active_prompt && (
+                                                                    <button
+                                                                        className="history-link-button"
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            if (onOpenHistoryWithSearch) onOpenHistoryWithSearch(log.active_prompt);
+                                                                        }}
+                                                                        title={`Filter by: "${log.active_prompt}"`}
+                                                                    >
+                                                                        View all with this prompt
+                                                                    </button>
+                                                                )}
+                                                                <button
+                                                                    className="history-link-button"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        const timestamp = parseInt(log.id.split('-')[1]);
+                                                                        handleDeleteFromRecent(log.id, timestamp);
+                                                                    }}
+                                                                    style={logDeleteConfirmId === log.id ? {
+                                                                        color: '#fff',
+                                                                        borderColor: '#dc2626',
+                                                                        backgroundColor: '#dc2626'
+                                                                    } : {}}
+                                                                >
+                                                                    {logDeleteConfirmId === log.id ? 'Confirm Delete?' : 'Delete Entry'}
+                                                                </button>
+                                                            </div>
                                                         </div>
-                                                    </div>
-                                                )}
-                                            </li>
-                                        );
-                                    })}
-                                </ul>
-                            </>
-                        )}
-                        <button
-                            type="button"
-                            className="view-history-button"
-                            id="tour-view-history-btn"
-                            onClick={onOpenHistory}
-                        >
-                            View Full History
-                        </button>
+                                                    )}
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                </>
+                            )}
+                            <button
+                                type="button"
+                                className="view-history-button"
+                                id="tour-view-history-btn"
+                                onClick={onOpenHistory}
+                            >
+                                View Full History
+                            </button>
+                        </div>
+                    )}
+                </div>
+                {/* --- END LOG FEED SECTION --- */}
+
+                {/* --- RENDER THE MODAL --- */}
+                {/* FullHistoryModal moved to App.jsx */}
+                {/* SavePresetModal removed */}
+
+                <PresetsModal
+                    isOpen={isPresetsModalOpen}
+                    onClose={() => setIsPresetsModalOpen(false)}
+                    presets={presets}
+                    activePresetId={activePreset?.id}
+                    onLoad={handleLoadPreset}
+                    onRename={handleRenamePreset}
+                    onDelete={handleDeletePreset}
+                    isStrictModeActive={isStrictModeActive}
+                />
+
+                {/* Toast Notification */}
+                {message && (
+                    <div className={`toast-notification ${message.includes('Error') || message.includes('Cannot') ? 'error' : 'success'}`}>
+                        <span className="toast-message">{message}</span>
+                        <button className="toast-close" onClick={() => setMessage(null)}>×</button>
                     </div>
                 )}
-            </div>
-            {/* --- END LOG FEED SECTION --- */}
-
-            {/* --- RENDER THE MODAL --- */}
-            {/* FullHistoryModal moved to App.jsx */}
-            {/* SavePresetModal removed */}
-
-            <PresetsModal
-                isOpen={isPresetsModalOpen}
-                onClose={() => setIsPresetsModalOpen(false)}
-                presets={presets}
-                activePresetId={activePreset?.id}
-                onLoad={handleLoadPreset}
-                onRename={handleRenamePreset}
-                onDelete={handleDeletePreset}
-            />
+            </div>{/* End dashboard-main-content */}
         </div>
     );
 }
@@ -1955,14 +2497,23 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
 // === Password Reset Component ===
 function PasswordResetForm({ onSuccess }) {
     const [password, setPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState(null);
 
     const handlePasswordUpdate = async (e) => {
         e.preventDefault();
         setLoading(true); setMessage(null);
+
         if (password.length < 6) {
             setMessage("Password must be at least 6 characters.");
+            setLoading(false);
+            return;
+        }
+
+        if (password !== confirmPassword) {
+            setMessage("Passwords do not match.");
             setLoading(false);
             return;
         }
@@ -1981,22 +2532,70 @@ function PasswordResetForm({ onSuccess }) {
     };
 
     return (
-        <div className="container" style={{ padding: '50px 0', maxWidth: '400px', margin: 'auto' }}>
-            <div style={{ background: 'white', padding: '2rem', borderRadius: '16px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}>
-                <h2 style={{ textAlign: 'center', color: '#2563eb', marginBottom: '1rem' }}>Set New Password</h2>
+        <div className="auth-container">
+            <div className="auth-card mode-login">
+                <style>{`
+                    .toggle-password {
+                        background: none;
+                        border: none;
+                        color: var(--text-muted);
+                        cursor: pointer;
+                        font-size: 0.8rem;
+                        position: absolute;
+                        right: 10px;
+                        top: 38px;
+                    }
+                `}</style>
+                <h2 style={{ textAlign: 'center', color: 'var(--primary-blue)', marginBottom: '1.5rem', marginTop: 0 }}>Set New Password</h2>
                 <form onSubmit={handlePasswordUpdate}>
-                    <label style={{ display: 'block', marginBottom: '0.5rem' }}>New Password</label>
-                    <input
-                        type="password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        style={{ width: '100%', padding: '0.5rem', marginBottom: '1rem', borderRadius: '4px', border: '1px solid #ccc' }}
-                        required
-                    />
-                    <button type="submit" disabled={loading} style={{ width: '100%', padding: '0.75rem', background: '#2563eb', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+                    <div className="form-group" style={{ position: 'relative' }}>
+                        <label className="form-label">New Password</label>
+                        <input
+                            type={showPassword ? "text" : "password"}
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            className="form-input"
+                            placeholder="Enter new password"
+                            required
+                        />
+                        <button
+                            type="button"
+                            className="toggle-password"
+                            onClick={() => setShowPassword(!showPassword)}
+                        >
+                            {showPassword ? "Hide" : "Show"}
+                        </button>
+                    </div>
+
+                    <div className="form-group">
+                        <label className="form-label">Confirm Password</label>
+                        <input
+                            type={showPassword ? "text" : "password"}
+                            value={confirmPassword}
+                            onChange={(e) => setConfirmPassword(e.target.value)}
+                            className="form-input"
+                            placeholder="Confirm new password"
+                            required
+                        />
+                    </div>
+
+                    <button type="submit" disabled={loading} className="auth-button">
                         {loading ? 'Updating...' : 'Update Password'}
                     </button>
-                    {message && <p style={{ marginTop: '1rem', textAlign: 'center', color: message.startsWith('Error') ? 'red' : 'green' }}>{message}</p>}
+
+                    {message && (
+                        <div style={{
+                            marginTop: '1rem',
+                            padding: '0.75rem',
+                            borderRadius: '8px',
+                            textAlign: 'center',
+                            fontSize: '0.9rem',
+                            backgroundColor: message.startsWith('Error') || message.includes('do not match') ? '#fee2e2' : '#dcfce7',
+                            color: message.startsWith('Error') || message.includes('do not match') ? '#b91c1c' : '#15803d'
+                        }}>
+                            {message}
+                        </div>
+                    )}
                 </form>
             </div>
         </div>
@@ -2011,6 +2610,17 @@ function AuthForm({ supabase }) {
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState(null);
+
+    // Check URL for referral code on mount
+    useEffect(() => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const ref = urlParams.get('ref');
+        if (ref) {
+            setReferralCode(ref);
+            setIsLogin(false); // Switch to signup mode if coming from referral link
+        }
+    }, []);
+
 
     const handleAuth = async (e) => {
         e.preventDefault();
@@ -2044,28 +2654,59 @@ function AuthForm({ supabase }) {
                 }
             }
         } else {
-            // Sign Up Logic
+            // Sign Up Logic - Use backend endpoint to handle referral codes and trial
             if (password.length < 6) {
                 setMessage("Password must be at least 6 characters.");
                 setLoading(false);
                 return;
             }
-            const { error } = await supabase.auth.signUp({
-                email,
-                password,
-            });
-            if (error) {
-                setMessage(error.message);
-            } else {
-                // Clear the onboarding flag so the tutorial shows for new users
-                localStorage.removeItem('hasSeenOnboarding');
-                setMessage("Account created! Please check your email to confirm your account. A tutorial will guide you through the app.");
+
+            try {
+                const signupRes = await fetch(`${config.BACKEND_URL}/signup`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+
+                const signupData = await signupRes.json();
+
+                if (!signupRes.ok) {
+                    // Check if it's a rate limit error from Supabase
+                    const errorMsg = signupData.error || 'Signup failed';
+                    if (errorMsg.toLowerCase().includes('wait') || errorMsg.toLowerCase().includes('rate')) {
+                        setMessage("Please wait a moment before trying again. If you already signed up, check your inbox for the confirmation email!");
+                    } else {
+                        setMessage(errorMsg);
+                    }
+                } else if (signupData.user?.identities?.length === 0) {
+                    // Supabase returns empty identities for existing confirmed email
+                    // This email is already registered and confirmed - user should log in instead
+                    setMessage("This email is already registered. Please log in instead, or use 'Forgot Password' if needed.");
+                } else if (signupData.user && !signupData.user.email_confirmed_at && signupData.user.identities?.length > 0) {
+                    // User exists but email not confirmed yet - could be re-signup attempt
+                    // Supabase will resend confirmation email
+                    setMessage("We've resent a confirmation email. Please check your inbox (and spam folder).");
+                } else {
+                    // Clear the onboarding flag so the tutorial shows for new users
+                    localStorage.removeItem('hasSeenOnboarding');
+                    setMessage("Account created! Please check your email to confirm your account.");
+                }
+            } catch (err) {
+                console.error('Signup error:', err);
+                setMessage('Network error. Please try again.');
             }
         }
         setLoading(false);
     };
 
     const handleGoogleLogin = async () => {
+        // Store referral code from URL if present (for new signups via OAuth)
+        const urlParams = new URLSearchParams(window.location.search);
+        const ref = urlParams.get('ref');
+        if (ref) {
+            localStorage.setItem('pendingReferralCode', ref.toUpperCase());
+        }
+
         const { error } = await supabase.auth.signInWithOAuth({
             provider: 'google',
             options: {
@@ -2296,6 +2937,58 @@ const BRAND_COLORS = {
 };
 const SYSTEM_RESET_STYLE = { bg: 'rgba(37, 99, 235, 0.1)', border: 'rgba(37, 99, 235, 0.25)' }; // Blue
 
+// --- Strict Mode Timer Component ---
+function StrictModeTimer({ endTime, isIndefinite, onExpire, onClick }) {
+    const [timeRemaining, setTimeRemaining] = useState({ hours: 0, minutes: 0, seconds: 0 });
+
+    useEffect(() => {
+        if (isIndefinite) return; // No countdown for indefinite mode
+
+        const updateTime = () => {
+            const now = Date.now();
+            const remaining = endTime - now;
+
+            if (remaining <= 0) {
+                onExpire();
+                return;
+            }
+
+            const hours = Math.floor(remaining / (1000 * 60 * 60));
+            const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((remaining % (1000 * 60)) / 1000);
+
+            setTimeRemaining({ hours, minutes, seconds });
+        };
+
+        updateTime(); // Initial update
+        const interval = setInterval(updateTime, 1000);
+
+        return () => clearInterval(interval);
+    }, [endTime, isIndefinite, onExpire]);
+
+
+    return (
+        <div
+            onClick={onClick}
+            className="strict-mode-timer-v2 dashboard-variant"
+            title="Click to manage Strict Mode"
+            style={{ cursor: 'pointer', transition: 'transform 0.2s', minWidth: '140px' }}
+        >
+            {isIndefinite ? (
+                <span className="timer-value" style={{ fontSize: '1rem', letterSpacing: '1px' }}>
+                    STRICT MODE
+                </span>
+            ) : (
+                <span className="timer-value">
+                    {String(timeRemaining.hours).padStart(2, '0')}:
+                    {String(timeRemaining.minutes).padStart(2, '0')}:
+                    {String(timeRemaining.seconds).padStart(2, '0')}
+                </span>
+            )}
+        </div>
+    );
+}
+
 export default function App() {
     const [session, setSession] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -2307,9 +3000,19 @@ export default function App() {
     const [initialSearchTerm, setInitialSearchTerm] = useState('');
 
     const [dashboardKey, setDashboardKey] = useState(0); // Key to force Dashboard refresh
+    const [showSubscriptionModal, setShowSubscriptionModal] = useState(false); // Triggered by SubscriptionGuard
 
     // --- Onboarding Restart State ---
     const [tourRestartKey, setTourRestartKey] = useState(0);
+
+    // --- Referral Prompt State (for new OAuth users) ---
+    const [showReferralPrompt, setShowReferralPrompt] = useState(false);
+    const [referralPromptCode, setReferralPromptCode] = useState('');
+    const [referralPromptLoading, setReferralPromptLoading] = useState(false);
+    const [referralPromptMessage, setReferralPromptMessage] = useState('');
+
+    // --- Payment Success Modal State ---
+    const [showPaymentSuccess, setShowPaymentSuccess] = useState(false);
 
     const handleRestartTour = () => {
         localStorage.removeItem('hasSeenOnboarding');
@@ -2324,17 +3027,61 @@ export default function App() {
 
     // --- Extension Status State ---
     const [extensionStatus, setExtensionStatus] = useState('loading'); // 'loading', 'active', 'not_installed', 'logged_out'
+    const prevExtensionStatus = useRef('loading');
+
+    // --- Track Extension Disable/Enable for Analytics ---
+    const trackExtensionStatusChange = useCallback(async (newStatus, oldStatus) => {
+        // Only track transitions between active and not_installed/logged_out
+        // Skip initial 'loading' state transitions
+        if (oldStatus === 'loading') return;
+        if (!session?.access_token) return;
+
+        let eventType = null;
+        if (oldStatus === 'active' && (newStatus === 'not_installed' || newStatus === 'logged_out')) {
+            eventType = 'extension_disabled';
+        } else if ((oldStatus === 'not_installed' || oldStatus === 'logged_out') && newStatus === 'active') {
+            eventType = 'extension_enabled';
+        }
+
+        if (eventType) {
+            try {
+                await fetch(`${config.BACKEND_URL}/api/engagement-event`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${session.access_token}`
+                    },
+                    body: JSON.stringify({
+                        event_type: eventType,
+                        metadata: { from_status: oldStatus, to_status: newStatus }
+                    })
+                });
+                console.log(`[ANALYTICS] Extension status change tracked: ${eventType}`);
+            } catch (err) {
+                console.warn('[ANALYTICS] Failed to track extension status change:', err);
+            }
+        }
+    }, [session?.access_token]);
 
     // --- Check for Extension ---
     useEffect(() => {
         const checkExtension = () => {
             const marker = document.getElementById('beacon-extension-status');
+            let newStatus;
             if (marker) {
                 const isLoggedIn = marker.getAttribute('data-logged-in') === 'true';
-                setExtensionStatus(isLoggedIn ? 'active' : 'logged_out');
+                newStatus = isLoggedIn ? 'active' : 'logged_out';
             } else {
-                setExtensionStatus('not_installed');
+                newStatus = 'not_installed';
             }
+
+            // Track status changes for analytics
+            if (newStatus !== prevExtensionStatus.current) {
+                trackExtensionStatusChange(newStatus, prevExtensionStatus.current);
+                prevExtensionStatus.current = newStatus;
+            }
+
+            setExtensionStatus(newStatus);
         };
 
         // Check immediately
@@ -2350,7 +3097,7 @@ export default function App() {
             window.removeEventListener('beacon-extension-update', checkExtension);
             clearInterval(timer);
         };
-    }, []);
+    }, [trackExtensionStatusChange]);
 
     // --- Theme State ---
     const [theme, setTheme] = useState(() => localStorage.getItem('beacon_theme') || 'system');
@@ -2417,11 +3164,24 @@ export default function App() {
                 window.history.replaceState({}, document.title, window.location.pathname);
             });
         }
+
+        // Handle Payment Success (from Stripe checkout redirect)
+        if (params.get('payment') === 'success') {
+            setShowPaymentSuccess(true);
+            // Clean URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
     }, []);
 
     // --- Helper: Sync Auth to Extension ---
     const syncAuthToExtension = (session) => {
         if (session?.access_token && session?.user?.email) {
+            // Prevent duplicate syncs (fixes log spam)
+            if (lastSyncedAuthToken === session.access_token) {
+                return;
+            }
+            lastSyncedAuthToken = session.access_token;
+
             document.dispatchEvent(new CustomEvent('BEACON_AUTH_SYNC', {
                 detail: {
                     token: session.access_token,
@@ -2442,10 +3202,69 @@ export default function App() {
         });
 
         // Listen for auth changes
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+            if (event === 'PASSWORD_RECOVERY') {
+                setRecoveryMode(true);
+            }
+
             setSession(session);
             if (session) {
                 syncAuthToExtension(session); // Sync on change
+
+                // Detect new OAuth users (created within last 2 minutes)
+                if (event === 'SIGNED_IN' && session.user) {
+                    const createdAt = new Date(session.user.created_at);
+                    const isNewUser = (Date.now() - createdAt.getTime()) < 2 * 60 * 1000;
+
+                    if (isNewUser) {
+                        console.log('[AUTH] New user detected, triggering onboarding');
+                        // Trigger onboarding tour
+                        localStorage.removeItem('hasSeenOnboarding');
+
+                        // Ensure trial is created for new OAuth users
+                        try {
+                            await fetch(`${config.BACKEND_URL}/api/ensure-trial`, {
+                                method: 'POST',
+                                headers: {
+                                    'Authorization': `Bearer ${session.access_token}`
+                                }
+                            });
+                            console.log('[AUTH] Trial ensured for new OAuth user');
+                        } catch (e) {
+                            console.error('[AUTH] Failed to ensure trial:', e);
+                        }
+
+                        // Check for pending referral code from OAuth redirect
+                        const pendingCode = localStorage.getItem('pendingReferralCode');
+                        if (pendingCode) {
+                            console.log('[AUTH] Applying pending referral code:', pendingCode);
+                            try {
+                                const res = await fetch(`${config.BACKEND_URL}/api/referral/apply`, {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'Authorization': `Bearer ${session.access_token}`
+                                    },
+                                    body: JSON.stringify({ code: pendingCode })
+                                });
+                                if (res.ok) {
+                                    console.log('[AUTH] Referral code applied successfully');
+                                }
+                            } catch (e) {
+                                console.error('[AUTH] Failed to apply referral code:', e);
+                            }
+                            localStorage.removeItem('pendingReferralCode');
+                        } else {
+                            // No pending code - show referral prompt for new OAuth users
+                            // Only show if onboarding is already complete, otherwise wait for it
+                            const hasSeenOnboarding = localStorage.getItem('hasSeenOnboarding');
+                            if (hasSeenOnboarding) {
+                                setTimeout(() => setShowReferralPrompt(true), 1000);
+                            }
+                            // If onboarding not complete, the referral prompt will show after onboarding finishes
+                        }
+                    }
+                }
             } else {
                 // Dispatch Logout Event to Extension
                 document.dispatchEvent(new CustomEvent('BEACON_AUTH_LOGOUT'));
@@ -2512,7 +3331,15 @@ export default function App() {
             {!session ? (
                 <AuthForm supabase={supabase} />
             ) : (
-                <div className="container">
+                <div>
+                    <SubscriptionGuard
+                        session={session}
+                        openSettingsToSubscription={() => setShowSubscriptionModal(true)}
+                        onSignOut={async () => {
+                            await supabase.auth.signOut();
+                            window.location.reload();
+                        }}
+                    >
                     <Dashboard
                         key={`${session.user.id}-${dashboardKey}`}
                         session={session}
@@ -2523,13 +3350,32 @@ export default function App() {
                         onThemeChange={setTheme}
                         extensionStatus={extensionStatus}
                         onRestartTour={handleRestartTour}
+                        showSubscriptionModal={showSubscriptionModal}
+                        onSubscriptionModalShown={() => setShowSubscriptionModal(false)}
                     />
+                    </SubscriptionGuard>
                     <OnboardingTour
                         key={tourRestartKey}
                         onOpenHistory={() => setIsHistoryModalOpen(true)}
                         onCloseHistory={() => setIsHistoryModalOpen(false)}
                         isHistoryModalOpen={isHistoryModalOpen}
-                        onClose={() => { }} // Simple placeholder for now
+                        onClose={async () => {
+                            // After onboarding completes, check if user needs referral prompt
+                            // Only for new users who haven't entered a referral code yet
+                            const pendingCode = localStorage.getItem('pendingReferralCode');
+                            if (!pendingCode) {
+                                // Also check if user was already referred (e.g., during signup)
+                                try {
+                                    const stats = await getReferralStats(session);
+                                    if (!stats.was_referred) {
+                                        setTimeout(() => setShowReferralPrompt(true), 500);
+                                    }
+                                } catch (e) {
+                                    // If check fails, show modal anyway
+                                    setTimeout(() => setShowReferralPrompt(true), 500);
+                                }
+                            }
+                        }}
                     />
                 </div>
             )}
@@ -2555,6 +3401,226 @@ export default function App() {
                 userId={session?.user?.id}
                 userEmail={session?.user?.email}
             />
+
+            {/* Referral Code Prompt Modal - shown to new OAuth users */}
+            {showReferralPrompt && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'rgba(0,0,0,0.5)',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    zIndex: 10000
+                }}>
+                    <div style={{
+                        background: 'var(--card-bg, white)',
+                        padding: '2rem',
+                        borderRadius: '16px',
+                        maxWidth: '400px',
+                        width: '90%',
+                        boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
+                    }}>
+                        <h2 style={{ margin: '0 0 0.5rem 0', color: 'var(--text-primary)' }}>One more thing!</h2>
+                        <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
+                            Got a referral code? Enter it and you'll both get 2 weeks free!
+                        </p>
+
+                        <input
+                            type="text"
+                            placeholder="e.g. BEACON-A1B2C3"
+                            value={referralPromptCode}
+                            onChange={(e) => {
+                                let value = e.target.value.toUpperCase();
+                                // If user pastes full URL, extract just the code
+                                if (value.includes('REF=')) {
+                                    const match = value.match(/REF=(BEACON-[A-Z0-9]+)/i);
+                                    if (match) value = match[1].toUpperCase();
+                                }
+                                setReferralPromptCode(value);
+                            }}
+                            style={{
+                                width: '100%',
+                                padding: '0.75rem',
+                                fontSize: '1rem',
+                                borderRadius: '8px',
+                                border: '1px solid var(--border-color)',
+                                marginBottom: '0.5rem',
+                                textTransform: 'uppercase',
+                                background: 'var(--input-bg)',
+                                color: 'var(--text-primary)'
+                            }}
+                        />
+
+                        {referralPromptMessage && (
+                            <p style={{
+                                color: referralPromptMessage.includes('success') ? '#16a34a' : '#dc2626',
+                                fontSize: '0.9rem',
+                                marginBottom: '0.5rem'
+                            }}>
+                                {referralPromptMessage}
+                            </p>
+                        )}
+
+                        <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem' }}>
+                            <button
+                                onClick={async () => {
+                                    if (!referralPromptCode.trim()) {
+                                        setShowReferralPrompt(false);
+                                        return;
+                                    }
+                                    setReferralPromptLoading(true);
+                                    try {
+                                        const res = await fetch(`${config.BACKEND_URL}/api/referral/apply`, {
+                                            method: 'POST',
+                                            headers: {
+                                                'Content-Type': 'application/json',
+                                                'Authorization': `Bearer ${session?.access_token}`
+                                            },
+                                            body: JSON.stringify({ code: referralPromptCode.trim() })
+                                        });
+                                        const data = await res.json();
+                                        if (res.ok) {
+                                            setReferralPromptMessage('Referral code applied successfully!');
+                                            setTimeout(() => setShowReferralPrompt(false), 1500);
+                                        } else {
+                                            setReferralPromptMessage(data.error || 'Invalid code');
+                                        }
+                                    } catch (e) {
+                                        setReferralPromptMessage('Failed to apply code');
+                                    }
+                                    setReferralPromptLoading(false);
+                                }}
+                                disabled={referralPromptLoading}
+                                className="primary-button"
+                                style={{
+                                    flex: 1,
+                                    opacity: referralPromptLoading ? 0.6 : 1
+                                }}
+                            >
+                                {referralPromptLoading ? 'Applying...' : 'Apply Code'}
+                            </button>
+                            <button
+                                onClick={() => setShowReferralPrompt(false)}
+                                className="neutral-button"
+                            >
+                                Skip
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Payment Success Modal - shown after Stripe checkout */}
+            {showPaymentSuccess && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'rgba(0,0,0,0.6)',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    zIndex: 10001,
+                    animation: 'fadeIn 0.3s ease'
+                }}>
+                    <div style={{
+                        background: 'linear-gradient(135deg, var(--card-bg, white) 0%, var(--card-bg, #f8fafc) 100%)',
+                        padding: '2.5rem',
+                        borderRadius: '20px',
+                        maxWidth: '440px',
+                        width: '90%',
+                        boxShadow: '0 25px 80px rgba(0,0,0,0.35)',
+                        textAlign: 'center',
+                        animation: 'slideUp 0.4s ease'
+                    }}>
+                        {/* Success Icon */}
+                        <div style={{
+                            width: '80px',
+                            height: '80px',
+                            background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+                            borderRadius: '50%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            margin: '0 auto 1.5rem',
+                            boxShadow: '0 8px 25px rgba(34, 197, 94, 0.4)'
+                        }}>
+                            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                        </div>
+
+                        <h2 style={{
+                            margin: '0 0 0.75rem 0',
+                            color: 'var(--text-primary)',
+                            fontSize: '1.6rem',
+                            fontWeight: '700'
+                        }}>
+                            Welcome Aboard!
+                        </h2>
+
+                        <p style={{
+                            color: 'var(--text-secondary)',
+                            fontSize: '1rem',
+                            lineHeight: '1.6',
+                            marginBottom: '1.5rem'
+                        }}>
+                            Your subscription is now active.
+                        </p>
+
+                        {/* Subscription Info Box */}
+                        <div style={{
+                            background: 'rgba(37, 99, 235, 0.08)',
+                            borderRadius: '12px',
+                            padding: '1.25rem',
+                            marginBottom: '1.5rem',
+                            textAlign: 'left'
+                        }}>
+                            <p style={{
+                                margin: '0 0 0.75rem 0',
+                                fontWeight: '600',
+                                color: 'var(--text-primary)',
+                                fontSize: '0.95rem'
+                            }}>
+                                Your first payment will be March 1st, 2026
+                            </p>
+                            <p style={{
+                                margin: '0 0 0.5rem 0',
+                                color: 'var(--text-secondary)',
+                                fontSize: '0.9rem',
+                                lineHeight: '1.5'
+                            }}>
+                                You can cancel anytime. If you cancel, you'll retain access until your paid period ends.
+                            </p>
+                            <p style={{
+                                margin: 0,
+                                fontSize: '0.85rem',
+                                color: 'var(--text-muted)'
+                            }}>
+                                A receipt has been sent to your email.
+                            </p>
+                        </div>
+
+                        <button
+                            onClick={() => setShowPaymentSuccess(false)}
+                            className="primary-button"
+                            style={{
+                                padding: '0.9rem 2rem',
+                                fontSize: '1rem',
+                                boxShadow: '0 4px 15px rgba(37, 99, 235, 0.35)'
+                            }}
+                        >
+                            Get Started
+                        </button>
+                    </div>
+                </div>
+            )}
         </>
     );
 }

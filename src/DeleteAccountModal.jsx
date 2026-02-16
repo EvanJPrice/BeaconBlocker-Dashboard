@@ -19,7 +19,7 @@ export default function DeleteAccountModal({ isOpen, onClose, onDelete, loading 
             <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px', height: 'auto', minHeight: 'auto' }}>
                 <div className="modal-header">
                     <h2 style={{ color: '#dc2626' }}>Delete Account</h2>
-                    <button className="modal-close-button" onClick={onClose}>&times;</button>
+                    <button className="modal-close-button" onClick={onClose}>✕</button>
                 </div>
 
                 <div style={{ padding: '1rem 0' }}>
