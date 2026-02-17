@@ -1201,7 +1201,7 @@ function ActivityTab({ settings, updateSetting, storageUsage }) {
                                 updateSetting('autoDeleteActivityLog', e.target.checked);
                                 // Sync to extension
                                 document.dispatchEvent(new CustomEvent('BEACON_ACTIVITY_LOG_SETTINGS_SYNC', {
-                                    detail: { autoDelete: e.target.checked, retentionDays: settings.activityLogRetention ?? 7, logAllowDecisions: settings.logAllowDecisions }
+                                    detail: { autoDelete: e.target.checked, retentionDays: settings.activityLogRetention ?? 7, logAllowDecisions: settings.logAllowDecisions, logCachedDecisions: settings.logCachedDecisions ?? false }
                                 }));
                             }}
                         />
@@ -1226,7 +1226,7 @@ function ActivityTab({ settings, updateSetting, storageUsage }) {
                                         updateSetting('activityLogRetention', option.value);
                                         // Sync to extension
                                         document.dispatchEvent(new CustomEvent('BEACON_ACTIVITY_LOG_SETTINGS_SYNC', {
-                                            detail: { autoDelete: settings.autoDeleteActivityLog, retentionDays: option.value, logAllowDecisions: settings.logAllowDecisions }
+                                            detail: { autoDelete: settings.autoDeleteActivityLog, retentionDays: option.value, logAllowDecisions: settings.logAllowDecisions, logCachedDecisions: settings.logCachedDecisions ?? false }
                                         }));
                                     }}
                                 >
@@ -1261,7 +1261,39 @@ function ActivityTab({ settings, updateSetting, storageUsage }) {
                                     detail: {
                                         autoDelete: settings.autoDeleteActivityLog,
                                         retentionDays: settings.activityLogRetention ?? 7,
-                                        logAllowDecisions: e.target.checked
+                                        logAllowDecisions: e.target.checked,
+                                        logCachedDecisions: settings.logCachedDecisions ?? false
+                                    }
+                                }));
+                            }}
+                        />
+                        <span className="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            {/* Log Cached Decisions Toggle */}
+            <div className="settings-item" style={{ marginTop: '1.5rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1 }}>
+                        <h4 style={{ marginBottom: '0.25rem' }}>Log Cached Decisions</h4>
+                        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: 0 }}>
+                            When enabled, repeat visits that use a cached result will also appear in your activity log.
+                        </p>
+                    </div>
+                    <label className="toggle-switch">
+                        <input
+                            type="checkbox"
+                            checked={settings.logCachedDecisions ?? false}
+                            onChange={(e) => {
+                                updateSetting('logCachedDecisions', e.target.checked);
+                                // Sync to extension
+                                document.dispatchEvent(new CustomEvent('BEACON_ACTIVITY_LOG_SETTINGS_SYNC', {
+                                    detail: {
+                                        autoDelete: settings.autoDeleteActivityLog,
+                                        retentionDays: settings.activityLogRetention ?? 7,
+                                        logAllowDecisions: settings.logAllowDecisions ?? false,
+                                        logCachedDecisions: e.target.checked
                                     }
                                 }));
                             }}

@@ -87,10 +87,10 @@ function syncPauseToExtension(paused) {
 }
 
 // --- Sync Activity Log Settings to Extension ---
-function syncActivityLogSettingsToExtension(autoDelete, retentionDays, logAllowDecisions) {
+function syncActivityLogSettingsToExtension(autoDelete, retentionDays, logAllowDecisions, logCachedDecisions) {
     // Use CustomEvent bridge (same pattern as pause sync)
     document.dispatchEvent(new CustomEvent('BEACON_ACTIVITY_LOG_SETTINGS_SYNC', {
-        detail: { autoDelete, retentionDays, logAllowDecisions }
+        detail: { autoDelete, retentionDays, logAllowDecisions, logCachedDecisions }
     }));
 }
 
@@ -306,7 +306,9 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
             autoDeleteActivityLog: false, // OFF by default - user must opt-in
             activityLogRetention: 7, // 7 or 30 days when enabled
             // ALLOW Decision Logging
-            logAllowDecisions: false // OFF by default - only log blocks unless user opts in
+            logAllowDecisions: false, // OFF by default - only log blocks unless user opts in
+            // Cached Decision Logging
+            logCachedDecisions: false // OFF by default - hide cached repeats unless user opts in
         };
     });
     const [storageUsage, setStorageUsage] = useState({ used: 0, max: 10485760 }); // 10 MB in bytes
@@ -355,16 +357,17 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
         }
     }, [userSettings.blockingPaused]);
 
-    // Sync activity log settings (including logAllowDecisions) to extension on mount and when changed
+    // Sync activity log settings to extension on mount and when changed
     useEffect(() => {
         document.dispatchEvent(new CustomEvent('BEACON_ACTIVITY_LOG_SETTINGS_SYNC', {
             detail: {
                 autoDelete: userSettings.autoDeleteActivityLog,
                 retentionDays: userSettings.activityLogRetention ?? 7,
-                logAllowDecisions: userSettings.logAllowDecisions ?? false
+                logAllowDecisions: userSettings.logAllowDecisions ?? false,
+                logCachedDecisions: userSettings.logCachedDecisions ?? false
             }
         }));
-    }, [userSettings.autoDeleteActivityLog, userSettings.activityLogRetention, userSettings.logAllowDecisions]);
+    }, [userSettings.autoDeleteActivityLog, userSettings.activityLogRetention, userSettings.logAllowDecisions, userSettings.logCachedDecisions]);
 
     const isStrictModeActive = userSettings.strictModeUntil && userSettings.strictModeUntil > Date.now();
 
