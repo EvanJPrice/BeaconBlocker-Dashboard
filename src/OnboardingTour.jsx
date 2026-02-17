@@ -39,19 +39,19 @@ const STEPS = [
     {
         target: 'tour-update-preset-btn',
         title: "Update Preset",
-        content: "The **Update** button saves changes to your currently loaded preset. It displays your preset name (click the name to rename it). If you make changes, this button turns green — click it to update. Click the **X** to unload the preset and reset.",
+        content: "The **Update Preset** button saves changes to your currently loaded preset. It displays your preset name (click the name to rename it). If you make changes, this button turns green — click it to update. Click the **X** to unload the preset and reset.",
         position: 'bottom'
     },
     {
         target: 'tour-save-preset-btn',
         title: "New Preset",
-        content: "The **New Preset** button saves your current settings as a new preset.",
+        content: "**New Preset** saves your current settings as a new preset.",
         position: 'bottom'
     },
     {
         target: 'tour-load-preset-btn',
-        title: "Load Button",
-        content: "The **Load** button allows you to access presets that have been previously saved.",
+        title: "Load Preset",
+        content: "**Load Preset** allows you to access presets that have been previously saved.",
         position: 'bottom',
         waitForClick: 'loadPreset'
     },

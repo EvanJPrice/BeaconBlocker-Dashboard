@@ -1980,7 +1980,7 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                                         cursor: (!activePreset || !isPresetModified || isStrictModeActive) ? 'not-allowed' : 'pointer'
                                     }}
                                 >
-                                    Update
+                                    Update Preset
                                 </button>
 
                                 {/* --- SAVE AS BUTTON --- */}
@@ -2022,7 +2022,7 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                                     className="preset-button"
                                     onClick={() => setIsPresetsModalOpen(true)}
                                 >
-                                    Load
+                                    Load Preset
                                 </button>
                             </div>
                         </div>
