@@ -2567,7 +2567,7 @@ function PasswordResetForm({ onSuccess }) {
                         </button>
                     </div>
 
-                    <div className="form-group">
+                    <div className="form-group" style={{ position: 'relative' }}>
                         <label className="form-label">Confirm Password</label>
                         <input
                             type={showPassword ? "text" : "password"}
@@ -2577,6 +2577,13 @@ function PasswordResetForm({ onSuccess }) {
                             placeholder="Confirm new password"
                             required
                         />
+                        <button
+                            type="button"
+                            className="toggle-password"
+                            onClick={() => setShowPassword(!showPassword)}
+                        >
+                            {showPassword ? "Hide" : "Show"}
+                        </button>
                     </div>
 
                     <button type="submit" disabled={loading} className="auth-button">

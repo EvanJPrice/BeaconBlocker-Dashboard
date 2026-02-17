@@ -36,7 +36,7 @@ function ReferralBanner({ session, onOpenSubscription }) {
     };
 
     // Build banner text based on user state
-    let bannerText = 'Loading...';
+    let bannerText = loading ? 'Loading...' : 'FREE February promo';
     if (!loading && stats) {
         if (stats.referee_bonus_pending) {
             if (stats.is_subscribed) {
