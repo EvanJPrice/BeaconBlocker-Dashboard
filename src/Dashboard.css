@@ -2568,6 +2568,8 @@
   gap: 12px;
   font-size: 0.85rem;
   animation: fadeIn 0.2s ease-out;
+  position: relative;
+  z-index: 20;
 }
 
 .validation-text {
