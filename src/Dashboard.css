@@ -3114,7 +3114,7 @@ input:checked+.toggle-slider:before {
   left: 0;
   width: 100%;
   height: 200px;
-  z-index: 1;
+  z-index: 0;
   pointer-events: none;
   overflow: visible;
 }
@@ -3204,7 +3204,7 @@ svg.cloud-band.layer-3 .cloud-group {
   left: 0;
   width: 100%;
   height: 140px;
-  z-index: 1;
+  z-index: 0;
   pointer-events: none;
   overflow: hidden;
 }
