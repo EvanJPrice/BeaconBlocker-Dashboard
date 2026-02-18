@@ -2998,6 +2998,8 @@ input:checked+.toggle-slider:before {
   margin: 0 auto;
   display: flex;
   flex-direction: column;
+  position: relative;
+  z-index: 10;
 }
 
 /* === TABLET (iPad) Breakpoint === */
@@ -3114,7 +3116,7 @@ input:checked+.toggle-slider:before {
   left: 0;
   width: 100%;
   height: 200px;
-  z-index: 0;
+  z-index: -1;
   pointer-events: none;
   overflow: visible;
 }
@@ -3204,7 +3206,7 @@ svg.cloud-band.layer-3 .cloud-group {
   left: 0;
   width: 100%;
   height: 140px;
-  z-index: 0;
+  z-index: -1;
   pointer-events: none;
   overflow: hidden;
 }
