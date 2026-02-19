@@ -305,6 +305,9 @@ function SettingsModal({ isOpen, onClose, settings, onSave, storageUsage, userEm
                         style={{
                             background: JSON.stringify(localSettings) !== JSON.stringify(settings)
                                 ? '#22c55e'
+                                : undefined,
+                            borderColor: JSON.stringify(localSettings) !== JSON.stringify(settings)
+                                ? '#22c55e'
                                 : undefined
                         }}
                     >

@@ -37,8 +37,9 @@ export default function FeatureRequestModal({ isOpen, onClose, userId, userEmail
                 : {};
 
             const payload = {
-                description: `[FEATURE IDEA] ${idea}`,
-                steps: '', // No steps for feature requests
+                description: idea,
+                steps: '',
+                type: 'feature',
                 anonymous: !userId,
                 user_id: userId,
                 user_email: manualEmail,

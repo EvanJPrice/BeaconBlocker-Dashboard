@@ -299,7 +299,7 @@ export default function BugReportModal({ isOpen, onClose, userId, userEmail }) {
                                     padding: '10px 20px',
                                     borderRadius: '6px',
                                     border: 'none',
-                                    background: '#234b7a',
+                                    background: 'var(--primary-blue)',
                                     color: 'white',
                                     cursor: loading ? 'not-allowed' : 'pointer',
                                     fontWeight: '600',
