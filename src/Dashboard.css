@@ -935,8 +935,49 @@
 
 .duration-input:disabled {
   background: var(--bg-primary);
-  /* Darker/disabled look */
   opacity: 0.6;
+}
+
+.stepper-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border-color);
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font-size: 1.2rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  padding: 0;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.stepper-btn:hover:not(:disabled) {
+  background: var(--hover-bg);
+  border-color: var(--text-secondary);
+}
+
+.stepper-btn:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.stepper-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.duration-value {
+  width: 36px;
+  text-align: center;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  user-select: none;
 }
 
 /* Preset Buttons Grid */

@@ -132,7 +132,7 @@ function SettingsModal({ isOpen, onClose, settings, onSave, storageUsage, userEm
         });
 
         // Call secure API to activate
-        activateStrictMode(session, isIndefinite ? 52560000 : (localSettings.strictModeDurationHours * 60 + localSettings.strictModeDurationMinutes))
+        activateStrictMode(session, isIndefinite ? 52560000 : ((localSettings.strictModeDurationHours || 0) * 60 + (localSettings.strictModeDurationMinutes || 0)))
             .then(data => {
                 console.log('[SETTINGS] Secure Strict Mode Activated via API:', data);
                 // Ensure local state matches server time
@@ -1877,34 +1877,54 @@ function BlockingTab({ settings, updateSetting, onActivateStrictMode, strictMode
                         <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>Duration</label>
                         <div className="duration-inputs">
                             <div className="duration-field">
-                                <input
-                                    type="number"
-                                    min="0"
-                                    max="24"
-                                    className="duration-input"
-                                    value={isIndefinite ? '' : (settings.strictModeDurationHours || '')}
-                                    disabled={isIndefinite}
-                                    onChange={(e) => {
-                                        const value = e.target.value === '' ? 0 : parseInt(e.target.value);
-                                        updateSetting('strictModeDurationHours', Math.min(24, Math.max(0, value)));
-                                    }}
-                                />
-                                <span style={{ color: 'var(--text-secondary)' }}>hours</span>
+                                <button
+                                    className="stepper-btn"
+                                    disabled={isIndefinite || (settings.strictModeDurationHours || 0) <= 0}
+                                    onClick={() => updateSetting('strictModeDurationHours', Math.max(0, (settings.strictModeDurationHours || 0) - 1))}
+                                >−</button>
+                                <span className="duration-value">{isIndefinite ? '–' : (settings.strictModeDurationHours || 0)}</span>
+                                <button
+                                    className="stepper-btn"
+                                    disabled={isIndefinite || (settings.strictModeDurationHours || 0) >= 24}
+                                    onClick={() => updateSetting('strictModeDurationHours', Math.min(24, (settings.strictModeDurationHours || 0) + 1))}
+                                >+</button>
+                                <span style={{ color: 'var(--text-secondary)' }}>hr</span>
                             </div>
                             <div className="duration-field">
-                                <input
-                                    type="number"
-                                    min="0"
-                                    max="59"
-                                    className="duration-input"
-                                    value={isIndefinite ? '' : (settings.strictModeDurationMinutes || '')}
+                                <button
+                                    className="stepper-btn"
                                     disabled={isIndefinite}
-                                    onChange={(e) => {
-                                        const value = e.target.value === '' ? 0 : parseInt(e.target.value);
-                                        updateSetting('strictModeDurationMinutes', Math.min(59, Math.max(0, value)));
+                                    onClick={() => {
+                                        const currentMin = settings.strictModeDurationMinutes || 0;
+                                        const currentHr = settings.strictModeDurationHours || 0;
+                                        if (currentMin <= 0) {
+                                            if (currentHr > 0) {
+                                                updateSetting('strictModeDurationMinutes', 55);
+                                                updateSetting('strictModeDurationHours', currentHr - 1);
+                                            }
+                                        } else {
+                                            updateSetting('strictModeDurationMinutes', currentMin - 5);
+                                        }
                                     }}
-                                />
-                                <span style={{ color: 'var(--text-secondary)' }}>minutes</span>
+                                >−</button>
+                                <span className="duration-value">{isIndefinite ? '–' : (settings.strictModeDurationMinutes || 0)}</span>
+                                <button
+                                    className="stepper-btn"
+                                    disabled={isIndefinite}
+                                    onClick={() => {
+                                        const currentMin = settings.strictModeDurationMinutes || 0;
+                                        const currentHr = settings.strictModeDurationHours || 0;
+                                        if (currentMin >= 55) {
+                                            if (currentHr < 24) {
+                                                updateSetting('strictModeDurationMinutes', 0);
+                                                updateSetting('strictModeDurationHours', currentHr + 1);
+                                            }
+                                        } else {
+                                            updateSetting('strictModeDurationMinutes', currentMin + 5);
+                                        }
+                                    }}
+                                >+</button>
+                                <span style={{ color: 'var(--text-secondary)' }}>min</span>
                             </div>
                         </div>
 
