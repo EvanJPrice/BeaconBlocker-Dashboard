@@ -164,6 +164,7 @@ function SettingsModal({ isOpen, onClose, settings, onSave, storageUsage, userEm
         <div className="modal-overlay" onClick={onClose}>
             <div
                 className="modal-content settings-modal"
+                id="tour-settings-modal"
                 onClick={(e) => e.stopPropagation()}
                 style={{
                     maxWidth: '900px',
@@ -327,6 +328,7 @@ function SettingsModal({ isOpen, onClose, settings, onSave, storageUsage, userEm
 function SubscriptionTab({ session }) {
     const [status, setStatus] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [fetchError, setFetchError] = useState(null);
     const [priceIds, setPriceIds] = useState({ monthly: '', yearly: '' }); // Dynamic IDs
     const [referralCode, setReferralCode] = useState(null);
     const [referralStats, setReferralStats] = useState(null);
@@ -340,6 +342,7 @@ function SubscriptionTab({ session }) {
 
     const fetchStatusAndConfig = async () => {
         try {
+            setFetchError(null);
             // Fetch user status
             const resStatus = await fetch(`${config.BACKEND_URL}/api/payments/status`, {
                 headers: { 'Authorization': `Bearer ${session?.access_token}` }
@@ -348,6 +351,9 @@ function SubscriptionTab({ session }) {
             if (resStatus.ok) {
                 statusData = await resStatus.json();
                 setStatus(statusData);
+            } else if (resStatus.status === 401 || resStatus.status === 403) {
+                setFetchError('session_expired');
+                return;
             }
 
             // Fetch public config (Price IDs)
@@ -503,10 +509,33 @@ function SubscriptionTab({ session }) {
 
     if (loading) return <div className="settings-tab-content">Loading...</div>;
 
+    if (fetchError === 'session_expired') {
+        return (
+            <div className="settings-tab-content">
+                <h3 style={{ marginTop: 0 }}>Subscription & Billing</h3>
+                <div style={{
+                    padding: '1.5rem',
+                    background: 'rgba(239, 68, 68, 0.05)',
+                    border: '1px solid #ef4444',
+                    borderRadius: '12px',
+                    textAlign: 'center'
+                }}>
+                    <p style={{ margin: '0 0 1rem', fontSize: '1rem', color: 'var(--text-primary)' }}>
+                        Your session has expired.
+                    </p>
+                    <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                        Please sign out and back in to view your subscription details.
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
     // Determine subscription state
     const hasStripeSubscription = status?.status && status.status !== 'none';
     const isActive = status?.is_pro; // active or trialing through Stripe
     const isTrial = status?.trial_active;
+    const isTrialExpired = status?.status === 'trialing' && !status?.is_pro; // Trial period ended
     const hasNoSubscription = !status || status.status === 'none';
 
     return (
@@ -515,17 +544,19 @@ function SubscriptionTab({ session }) {
 
             <div style={{
                 padding: '1.5rem',
-                background: isActive ? 'rgba(34, 197, 94, 0.1)' : 'var(--input-bg)',
-                border: `1px solid ${isActive ? '#22c55e' : 'var(--border-color)'}`,
+                background: isActive ? 'rgba(34, 197, 94, 0.1)' : isTrialExpired ? 'rgba(239, 68, 68, 0.05)' : 'var(--input-bg)',
+                border: `1px solid ${isActive ? '#22c55e' : isTrialExpired ? '#ef4444' : 'var(--border-color)'}`,
                 borderRadius: '12px',
                 marginBottom: '2rem'
             }}>
                 <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     {hasNoSubscription
                         ? 'No Active Subscription'
-                        : isTrial
-                            ? 'Trial Active'
-                            : `Subscribed — ${status?.billing_interval === 'year' ? 'Annual' : 'Monthly'}`}
+                        : isTrialExpired
+                            ? 'Trial Expired'
+                            : isTrial
+                                ? 'Trial Active'
+                                : `Subscribed — ${status?.billing_interval === 'year' ? 'Annual' : 'Monthly'}`}
                     {status?.cancel_at_period_end && (
                         <span style={{
                             fontSize: '0.75rem',
@@ -542,11 +573,13 @@ function SubscriptionTab({ session }) {
                 <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
                     {hasNoSubscription
                         ? 'Subscribe to unlock all features.'
-                        : isTrial
-                            ? `Trial active until ${new Date(status.current_period_end).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'long', day: 'numeric' })}`
-                            : status?.cancel_at_period_end
-                                ? `Access until ${new Date(status.current_period_end).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'long', day: 'numeric', year: 'numeric' })}`
-                                : `Renews ${new Date(status.current_period_end).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'long', day: 'numeric', year: 'numeric' })}`}
+                        : isTrialExpired
+                            ? 'Subscribe to continue using Beacon Blocker.'
+                            : isTrial
+                                ? `Trial active until ${new Date(status.current_period_end).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'long', day: 'numeric' })}`
+                                : status?.cancel_at_period_end
+                                    ? `Access until ${new Date(status.current_period_end).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'long', day: 'numeric', year: 'numeric' })}`
+                                    : `Renews ${new Date(status.current_period_end).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'long', day: 'numeric', year: 'numeric' })}`}
                 </p>
 
                 {/* Manage Subscription for paying users */}
@@ -766,7 +799,9 @@ function SubscriptionTab({ session }) {
                         Choose Your Plan
                     </h4>
                     <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem', fontSize: '0.95rem' }}>
-                        Your card will be charged after your trial ends.
+                        {isTrialExpired || hasNoSubscription
+                            ? 'Choose a plan to get started.'
+                            : 'Your card will be charged after your trial ends.'}
                     </p>
 
                     {/* Referral code section - inline on the page */}

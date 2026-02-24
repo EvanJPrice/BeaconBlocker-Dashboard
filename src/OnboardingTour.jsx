@@ -13,21 +13,30 @@ const STEPS = [
     {
         target: 'tour-settings-btn',
         title: "Settings",
-        content: "The **Settings** gear is your command center. Here you can enable **Strict Mode** (unbreakable focus), manage your account, and customize your dashboard appearance.",
+        content: "Open **Settings** to enable **Strict Mode** (unbreakable focus), manage your account, and customize your dashboard appearance.",
         position: 'bottom',
-        highlightLogo: false
+        highlightLogo: false,
+        waitForClick: 'settings'
+    },
+    {
+        target: 'tour-settings-modal',
+        title: "Settings",
+        content: "Explore your settings here! Manage your account, enable Strict Mode, adjust your theme, and more.",
+        position: 'center',
+        requireOpen: 'settingsModal',
+        hidden: true // Only shown when user clicks settings button
     },
     {
         target: 'tour-main-prompt',
         title: "Set Your Heading",
-        content: "The glowing box is your **Beacon** — your main tool for telling Beacon Blocker how it can help you. Write your goal or specific rules, and your Beacon will use AI to decide whether each **page you visit** should be blocked or allowed based on its URL, title, and content.\n\nYou can also set **timers** and **schedules** — e.g. \"block social media for 2 hours\" or \"until 5 PM.\" For simple site blocking, try the **Quick Block Categories** and **Allow/Block Lists** below.\n\n(Try typing something now!)",
+        content: "The glowing box is your **Beacon** — your main tool for telling Beacon Blocker how it can help you. Write your goal or specific rules, and your Beacon will use AI to decide whether each **page you visit** should be blocked or allowed based on its URL, title, and content.\n\nYou can also set **timers** and **schedules** — e.g. \"block social media for 2 hours\" or \"until 5 PM.\"\n\n(Try typing something now!)",
         position: 'bottom',
         highlightLogo: true // Also highlight logo during this step
     },
     {
         target: 'tour-auto-sync',
         title: "Auto Sync",
-        content: "Did you notice anything when you typed? Beacon Blocker automatically saves and syncs your changes.\n\n(Orange = Syncing | Green = Synced)",
+        content: "Did you notice anything when you typed? Beacon Blocker automatically saves and syncs your changes.\n\n(Orange = Syncing | Green = Synced | Red = Un-synced)",
         position: 'bottom'
     },
     {
@@ -39,7 +48,7 @@ const STEPS = [
     {
         target: 'tour-update-preset-btn',
         title: "Update Preset",
-        content: "The **Update Preset** button saves changes to your currently loaded preset. It displays your preset name (click the name to rename it). If you make changes, this button turns green — click it to update. Click the **X** to unload the preset and reset.",
+        content: "**Update Preset** saves changes to your currently loaded preset. If you make changes, this button turns green — click it to update.",
         position: 'bottom'
     },
     {
@@ -80,7 +89,7 @@ const STEPS = [
     {
         target: 'tour-lists',
         title: "Lists",
-        content: "Entries on the **Always Allow**, or white, **List** will always be allowed (overriding everything else), while entries on the **Always Block**, or black, **List** will always be blocked.",
+        content: "Entries on the **Always Allow**, or **White List**, will always be allowed (overriding everything else), while entries on the **Always Block**, or **Black List**, will always be blocked.",
         position: 'top',
         requireOpen: 'controls'
     },
@@ -158,12 +167,16 @@ export default function OnboardingTour({ onClose, onOpenHistory, onCloseHistory,
 
     // Helper to find next non-hidden step
     const goToNextStep = () => {
-        // If leaving hidden Load Modal step, close the modal first
+        // If leaving a hidden modal step, close the modal first
         const currentStep = STEPS[stepIndex];
-        if (currentStep && currentStep.hidden && currentStep.requireOpen === 'loadModal') {
-            const modalCloseBtn = document.querySelector('#tour-load-modal .modal-close-button');
-            if (modalCloseBtn) {
-                modalCloseBtn.click();
+        if (currentStep && currentStep.hidden) {
+            if (currentStep.requireOpen === 'loadModal') {
+                const modalCloseBtn = document.querySelector('#tour-load-modal .modal-close-button');
+                if (modalCloseBtn) modalCloseBtn.click();
+            } else if (currentStep.requireOpen === 'settingsModal') {
+                // Close settings modal by clicking the overlay
+                const overlay = document.querySelector('.modal-overlay');
+                if (overlay) overlay.click();
             }
         }
 
@@ -304,6 +317,8 @@ export default function OnboardingTour({ onClose, onOpenHistory, onCloseHistory,
                 targetEl = document.getElementById('tour-view-history-btn');
             } else if (step.waitForClick === 'loadPreset') {
                 targetEl = document.getElementById('tour-load-preset-btn');
+            } else if (step.waitForClick === 'settings') {
+                targetEl = document.getElementById('tour-settings-btn');
             }
 
             if (targetEl) {
@@ -312,10 +327,11 @@ export default function OnboardingTour({ onClose, onOpenHistory, onCloseHistory,
             }
         }
 
-        // --- MODAL CLOSE WATCHER: Auto-advance when Load Modal closes ---
-        if (step.hidden && step.requireOpen === 'loadModal') {
+        // --- MODAL CLOSE WATCHER: Auto-advance when modal closes ---
+        if (step.hidden && (step.requireOpen === 'loadModal' || step.requireOpen === 'settingsModal')) {
+            const modalId = step.requireOpen === 'loadModal' ? 'tour-load-modal' : 'tour-settings-modal';
             const checkModalClosed = () => {
-                const modal = document.getElementById('tour-load-modal');
+                const modal = document.getElementById(modalId);
                 if (!modal) {
                     // Modal closed, advance to next step
                     goToNextStep();
@@ -365,19 +381,19 @@ export default function OnboardingTour({ onClose, onOpenHistory, onCloseHistory,
         // Check if modal JUST opened (false -> true)
         const modalJustOpened = isHistoryModalOpen && !prevIsHistoryModalOpen.current;
 
-        // If we are on "View Full History" step (index 13) and the modal opens,
-        // automatically advance to "Full History Modal" (index 14).
-        if (stepIndex === 13 && modalJustOpened) {
-            setStepIndex(14);
+        // If we are on "View Full History" step (index 15) and the modal opens,
+        // automatically advance to "Full History Modal" (index 16).
+        if (stepIndex === 15 && modalJustOpened) {
+            setStepIndex(16);
         }
 
         // Check if modal JUST closed (true -> false)
         const modalJustClosed = !isHistoryModalOpen && prevIsHistoryModalOpen.current;
 
-        // If we are on "Full History Modal" step (index 14) and the modal closes,
-        // automatically advance to "Pin Extension" step (index 15).
-        if (stepIndex === 14 && modalJustClosed) {
-            setStepIndex(15);
+        // If we are on "Full History Modal" step (index 16) and the modal closes,
+        // automatically advance to "Pin Extension" step (index 17).
+        if (stepIndex === 16 && modalJustClosed) {
+            setStepIndex(17);
         }
 
         // Update ref
@@ -679,11 +695,14 @@ export default function OnboardingTour({ onClose, onOpenHistory, onCloseHistory,
             }
         }
 
-        // If leaving hidden Load Modal step, close the modal
-        if (currentStep.hidden && currentStep.requireOpen === 'loadModal') {
-            const modalCloseBtn = document.querySelector('#tour-load-modal .modal-close-button');
-            if (modalCloseBtn) {
-                modalCloseBtn.click();
+        // If leaving a hidden modal step, close the modal
+        if (currentStep.hidden) {
+            if (currentStep.requireOpen === 'loadModal') {
+                const modalCloseBtn = document.querySelector('#tour-load-modal .modal-close-button');
+                if (modalCloseBtn) modalCloseBtn.click();
+            } else if (currentStep.requireOpen === 'settingsModal') {
+                const overlay = document.querySelector('.modal-overlay');
+                if (overlay) overlay.click();
             }
         }
 
@@ -691,8 +710,16 @@ export default function OnboardingTour({ onClose, onOpenHistory, onCloseHistory,
     };
 
     const handleBack = () => {
-        // If on a hidden step, return to the step before we entered it
+        // If on a hidden step, close any open modal and return to the step before we entered it
         if (STEPS[stepIndex].hidden && prevStepBeforeHiddenRef.current !== null) {
+            const currentStep = STEPS[stepIndex];
+            if (currentStep.requireOpen === 'loadModal') {
+                const modalCloseBtn = document.querySelector('#tour-load-modal .modal-close-button');
+                if (modalCloseBtn) modalCloseBtn.click();
+            } else if (currentStep.requireOpen === 'settingsModal') {
+                const overlay = document.querySelector('.modal-overlay');
+                if (overlay) overlay.click();
+            }
             setStepIndex(prevStepBeforeHiddenRef.current);
             prevStepBeforeHiddenRef.current = null;
             return;

@@ -176,6 +176,7 @@ const commonSiteMappings = {
 function SubscriptionGuard({ session, children, openSettingsToSubscription, onSignOut }) {
     const [status, setStatus] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [sessionError, setSessionError] = useState(false);
 
     useEffect(() => {
         if (!session?.access_token) {
@@ -190,9 +191,12 @@ function SubscriptionGuard({ session, children, openSettingsToSubscription, onSi
                 });
                 if (res.ok) {
                     setStatus(await res.json());
+                } else if (res.status === 401 || res.status === 403) {
+                    setSessionError(true);
                 }
             } catch (e) {
                 console.error('Sub Check Error:', e);
+                setSessionError(true);
             } finally {
                 setLoading(false);
             }
@@ -207,36 +211,57 @@ function SubscriptionGuard({ session, children, openSettingsToSubscription, onSi
     const isTrial = status?.trial_active;
     const hasAccess = isPro || isTrial;
 
+    // Block access when: expired trial/sub, no subscription, OR session error (403/401)
+    const showOverlay = (!hasAccess && status) || sessionError;
+
     return (
         <>
-            {!hasAccess && status && (
+            {showOverlay && (
                 <div style={{
                     position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
                     background: 'rgba(0,0,0,0.85)', zIndex: 999,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     flexDirection: 'column', color: 'white', textAlign: 'center'
                 }}>
-                    <h1 style={{ fontSize: '3rem', marginBottom: '1rem' }}>Free Access Expired</h1>
-                    <p style={{ fontSize: '1.2rem', maxWidth: '500px', marginBottom: '2rem', opacity: 0.8 }}>
-                        Your free access has ended. Subscribe to keep your digital distractions at bay.
-                    </p>
-                    <button
-                        className="primary-button"
-                        style={{ fontSize: '1.2rem', padding: '1rem 2rem' }}
-                        onClick={openSettingsToSubscription}
-                    >
-                        Subscribe Now
-                    </button>
-                    <button
-                        onClick={onSignOut}
-                        style={{
-                            marginTop: '1.5rem', background: 'none', border: 'none',
-                            color: 'rgba(255,255,255,0.5)', cursor: 'pointer',
-                            fontSize: '0.9rem', textDecoration: 'underline'
-                        }}
-                    >
-                        Sign Out
-                    </button>
+                    {sessionError ? (
+                        <>
+                            <h1 style={{ fontSize: '3rem', marginBottom: '1rem' }}>Session Expired</h1>
+                            <p style={{ fontSize: '1.2rem', maxWidth: '500px', marginBottom: '2rem', opacity: 0.8 }}>
+                                Your session has expired. Please sign out and back in to continue.
+                            </p>
+                            <button
+                                onClick={onSignOut}
+                                className="primary-button"
+                                style={{ fontSize: '1.2rem', padding: '1rem 2rem' }}
+                            >
+                                Sign Out
+                            </button>
+                        </>
+                    ) : (
+                        <>
+                            <h1 style={{ fontSize: '3rem', marginBottom: '1rem' }}>Free Access Expired</h1>
+                            <p style={{ fontSize: '1.2rem', maxWidth: '500px', marginBottom: '2rem', opacity: 0.8 }}>
+                                Your free access has ended. Subscribe to keep your digital distractions at bay.
+                            </p>
+                            <button
+                                className="primary-button"
+                                style={{ fontSize: '1.2rem', padding: '1rem 2rem' }}
+                                onClick={openSettingsToSubscription}
+                            >
+                                Subscribe Now
+                            </button>
+                            <button
+                                onClick={onSignOut}
+                                style={{
+                                    marginTop: '1.5rem', background: 'none', border: 'none',
+                                    color: 'rgba(255,255,255,0.5)', cursor: 'pointer',
+                                    fontSize: '0.9rem', textDecoration: 'underline'
+                                }}
+                            >
+                                Sign Out
+                            </button>
+                        </>
+                    )}
                 </div>
             )}
             {children}
