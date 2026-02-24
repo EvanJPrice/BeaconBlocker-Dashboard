@@ -36,7 +36,7 @@ function ReferralBanner({ session, onOpenSubscription }) {
     };
 
     // Build banner text based on user state
-    let bannerText = loading ? 'Loading...' : 'FREE February promo';
+    let bannerText = loading ? 'Loading...' : 'Refer friends, earn bonus days';
     if (!loading && stats) {
         if (stats.referee_bonus_pending) {
             if (stats.is_subscribed) {
@@ -51,10 +51,10 @@ function ReferralBanner({ session, onOpenSubscription }) {
             bannerText = `+${stats.total_days_earned} bonus days earned!`;
         } else if (stats.pending > 0) {
             // User has pending referrals (signed up with code but haven't subscribed yet)
-            bannerText = `FREE February • ${stats.pending} pending`;
+            bannerText = `${stats.pending} referral(s) pending`;
         } else {
             // Default state - encourage sharing
-            bannerText = 'FREE February promo';
+            bannerText = 'Refer friends, earn bonus days';
         }
     }
 

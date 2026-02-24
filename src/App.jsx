@@ -1738,7 +1738,7 @@ function Dashboard({ session, onReportBug, onOpenHistory, onOpenHistoryWithSearc
                         />
                     )}
 
-                    {/* Referral Banner - Free until March 1 */}
+                    {/* Referral Banner */}
                     <ReferralBanner
                         session={session}
                         onOpenSubscription={() => {
@@ -3023,6 +3023,7 @@ export default function App() {
 
     // --- Payment Success Modal State ---
     const [showPaymentSuccess, setShowPaymentSuccess] = useState(false);
+    const [paymentSuccessData, setPaymentSuccessData] = useState(null);
 
     const handleRestartTour = () => {
         localStorage.removeItem('hasSeenOnboarding');
@@ -3177,9 +3178,21 @@ export default function App() {
 
         // Handle Payment Success (from Stripe checkout redirect)
         if (params.get('payment') === 'success') {
-            setShowPaymentSuccess(true);
-            // Clean URL
             window.history.replaceState({}, document.title, window.location.pathname);
+            const fetchAndShow = async () => {
+                try {
+                    const res = await fetch(`${config.BACKEND_URL}/api/payments/status`, {
+                        headers: { 'Authorization': `Bearer ${session?.access_token}` }
+                    });
+                    if (res.ok) {
+                        setPaymentSuccessData(await res.json());
+                    }
+                } catch (e) {
+                    console.error('Failed to fetch status for payment modal:', e);
+                }
+                setShowPaymentSuccess(true);
+            };
+            fetchAndShow();
         }
     }, []);
 
@@ -3525,112 +3538,142 @@ export default function App() {
             )}
 
             {/* Payment Success Modal - shown after Stripe checkout */}
-            {showPaymentSuccess && (
-                <div style={{
-                    position: 'fixed',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    background: 'rgba(0,0,0,0.6)',
-                    display: 'flex',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    zIndex: 10001,
-                    animation: 'fadeIn 0.3s ease'
-                }}>
+            {showPaymentSuccess && (() => {
+                const isTrial = paymentSuccessData?.trial_active;
+                const isActive = paymentSuccessData?.status === 'active';
+                const periodEnd = paymentSuccessData?.current_period_end
+                    ? new Date(paymentSuccessData.current_period_end).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+                    : null;
+                const billingLabel = paymentSuccessData?.billing_interval === 'year' ? 'Annual' : 'Monthly';
+
+                return (
                     <div style={{
-                        background: 'linear-gradient(135deg, var(--card-bg, white) 0%, var(--card-bg, #f8fafc) 100%)',
-                        padding: '2.5rem',
-                        borderRadius: '20px',
-                        maxWidth: '440px',
-                        width: '90%',
-                        boxShadow: '0 25px 80px rgba(0,0,0,0.35)',
-                        textAlign: 'center',
-                        animation: 'slideUp 0.4s ease'
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        background: 'rgba(0,0,0,0.6)',
+                        display: 'flex',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        zIndex: 10001,
+                        animation: 'fadeIn 0.3s ease'
                     }}>
-                        {/* Success Icon */}
                         <div style={{
-                            width: '80px',
-                            height: '80px',
-                            background: 'linear-gradient(135deg, #22c55e, #16a34a)',
-                            borderRadius: '50%',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            margin: '0 auto 1.5rem',
-                            boxShadow: '0 8px 25px rgba(34, 197, 94, 0.4)'
+                            background: 'linear-gradient(135deg, var(--card-bg, white) 0%, var(--card-bg, #f8fafc) 100%)',
+                            padding: '2.5rem',
+                            borderRadius: '20px',
+                            maxWidth: '440px',
+                            width: '90%',
+                            boxShadow: '0 25px 80px rgba(0,0,0,0.35)',
+                            textAlign: 'center',
+                            animation: 'slideUp 0.4s ease'
                         }}>
-                            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
-                                <polyline points="20 6 9 17 4 12" />
-                            </svg>
-                        </div>
+                            {/* Success Icon */}
+                            <div style={{
+                                width: '80px',
+                                height: '80px',
+                                background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+                                borderRadius: '50%',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                margin: '0 auto 1.5rem',
+                                boxShadow: '0 8px 25px rgba(34, 197, 94, 0.4)'
+                            }}>
+                                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                            </div>
 
-                        <h2 style={{
-                            margin: '0 0 0.75rem 0',
-                            color: 'var(--text-primary)',
-                            fontSize: '1.6rem',
-                            fontWeight: '700'
-                        }}>
-                            Welcome Aboard!
-                        </h2>
-
-                        <p style={{
-                            color: 'var(--text-secondary)',
-                            fontSize: '1rem',
-                            lineHeight: '1.6',
-                            marginBottom: '1.5rem'
-                        }}>
-                            Your subscription is now active.
-                        </p>
-
-                        {/* Subscription Info Box */}
-                        <div style={{
-                            background: 'rgba(37, 99, 235, 0.08)',
-                            borderRadius: '12px',
-                            padding: '1.25rem',
-                            marginBottom: '1.5rem',
-                            textAlign: 'left'
-                        }}>
-                            <p style={{
+                            <h2 style={{
                                 margin: '0 0 0.75rem 0',
-                                fontWeight: '600',
                                 color: 'var(--text-primary)',
-                                fontSize: '0.95rem'
+                                fontSize: '1.6rem',
+                                fontWeight: '700'
                             }}>
-                                Your first payment will be March 1st, 2026
-                            </p>
-                            <p style={{
-                                margin: '0 0 0.5rem 0',
-                                color: 'var(--text-secondary)',
-                                fontSize: '0.9rem',
-                                lineHeight: '1.5'
-                            }}>
-                                You can cancel anytime. If you cancel, you'll retain access until your paid period ends.
-                            </p>
-                            <p style={{
-                                margin: 0,
-                                fontSize: '0.85rem',
-                                color: 'var(--text-muted)'
-                            }}>
-                                A receipt has been sent to your email.
-                            </p>
-                        </div>
+                                {isTrial ? 'Your Free Trial Has Started!' : 'Welcome Aboard!'}
+                            </h2>
 
-                        <button
-                            onClick={() => setShowPaymentSuccess(false)}
-                            className="primary-button"
-                            style={{
-                                padding: '0.9rem 2rem',
+                            <p style={{
+                                color: 'var(--text-secondary)',
                                 fontSize: '1rem',
-                                boxShadow: '0 4px 15px rgba(37, 99, 235, 0.35)'
-                            }}
-                        >
-                            Get Started
-                        </button>
+                                lineHeight: '1.6',
+                                marginBottom: '1.5rem'
+                            }}>
+                                {isTrial
+                                    ? 'Enjoy full access to Beacon Blocker for 7 days.'
+                                    : 'Your subscription is now active.'}
+                            </p>
+
+                            {/* Subscription Info Box */}
+                            <div style={{
+                                background: 'rgba(37, 99, 235, 0.08)',
+                                borderRadius: '12px',
+                                padding: '1.25rem',
+                                marginBottom: '1.5rem',
+                                textAlign: 'left'
+                            }}>
+                                {isTrial && periodEnd && (
+                                    <p style={{
+                                        margin: '0 0 0.75rem 0',
+                                        fontWeight: '600',
+                                        color: 'var(--text-primary)',
+                                        fontSize: '0.95rem'
+                                    }}>
+                                        Your first payment will be on {periodEnd}
+                                    </p>
+                                )}
+                                {isActive && (
+                                    <p style={{
+                                        margin: '0 0 0.75rem 0',
+                                        fontWeight: '600',
+                                        color: 'var(--text-primary)',
+                                        fontSize: '0.95rem'
+                                    }}>
+                                        {billingLabel} plan &middot; Next billing date: {periodEnd || 'N/A'}
+                                    </p>
+                                )}
+                                <p style={{
+                                    margin: '0 0 0.5rem 0',
+                                    color: 'var(--text-secondary)',
+                                    fontSize: '0.9rem',
+                                    lineHeight: '1.5'
+                                }}>
+                                    {isTrial
+                                        ? 'You can cancel anytime before your trial ends.'
+                                        : 'You can cancel anytime. You\'ll retain access until your paid period ends.'}
+                                </p>
+                                <p style={{
+                                    margin: 0,
+                                    fontSize: '0.85rem',
+                                    color: 'var(--text-muted)'
+                                }}>
+                                    {isTrial
+                                        ? 'A confirmation has been sent to your email.'
+                                        : 'A receipt has been sent to your email.'}
+                                </p>
+                            </div>
+
+                            <button
+                                onClick={() => {
+                                    setShowPaymentSuccess(false);
+                                    setPaymentSuccessData(null);
+                                }}
+                                className="primary-button"
+                                style={{
+                                    padding: '0.9rem 2rem',
+                                    fontSize: '1rem',
+                                    boxShadow: '0 4px 15px rgba(37, 99, 235, 0.35)'
+                                }}
+                            >
+                                Get Started
+                            </button>
+                        </div>
                     </div>
-                </div>
-            )}
+                );
+            })()}
         </>
     );
 }

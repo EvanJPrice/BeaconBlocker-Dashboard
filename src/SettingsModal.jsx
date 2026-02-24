@@ -509,11 +509,6 @@ function SubscriptionTab({ session }) {
     const isTrial = status?.trial_active;
     const hasNoSubscription = !status || status.status === 'none';
 
-    // Check if we're still in February promo period
-    const now = new Date();
-    const marchFirst = new Date('2026-03-01T00:00:00Z');
-    const isFebruaryPromo = now < marchFirst;
-
     return (
         <div className="settings-tab-content">
             <h3 style={{ marginTop: 0 }}>Subscription & Billing</h3>
@@ -527,22 +522,10 @@ function SubscriptionTab({ session }) {
             }}>
                 <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     {hasNoSubscription
-                        ? 'Free February Access'
+                        ? 'No Active Subscription'
                         : isTrial
                             ? 'Trial Active'
                             : `Subscribed — ${status?.billing_interval === 'year' ? 'Annual' : 'Monthly'}`}
-                    {isTrial && isFebruaryPromo && (
-                        <span style={{
-                            fontSize: '0.75rem',
-                            background: 'rgba(37, 99, 235, 0.1)',
-                            color: '#2563eb',
-                            padding: '2px 8px',
-                            borderRadius: '4px',
-                            fontWeight: '600'
-                        }}>
-                            FREE February promo
-                        </span>
-                    )}
                     {status?.cancel_at_period_end && (
                         <span style={{
                             fontSize: '0.75rem',
@@ -558,13 +541,9 @@ function SubscriptionTab({ session }) {
                 </h4>
                 <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
                     {hasNoSubscription
-                        ? (isFebruaryPromo
-                            ? 'Subscribe now to lock in our launch price — prices may increase after launch. Your free access continues until March 1st.'
-                            : 'Subscribe to unlock all features.')
+                        ? 'Subscribe to unlock all features.'
                         : isTrial
-                            ? (isFebruaryPromo
-                                ? 'Subscribe now to lock in our launch price — prices may increase after launch. Your free access continues until March 1st.'
-                                : `Trial active until ${new Date(status.current_period_end).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'long', day: 'numeric' })}`)
+                            ? `Trial active until ${new Date(status.current_period_end).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'long', day: 'numeric' })}`
                             : status?.cancel_at_period_end
                                 ? `Access until ${new Date(status.current_period_end).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'long', day: 'numeric', year: 'numeric' })}`
                                 : `Renews ${new Date(status.current_period_end).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'long', day: 'numeric', year: 'numeric' })}`}
@@ -787,9 +766,7 @@ function SubscriptionTab({ session }) {
                         Choose Your Plan
                     </h4>
                     <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem', fontSize: '0.95rem' }}>
-                        {isFebruaryPromo
-                            ? 'Subscribe now. Billing starts March 1st.'
-                            : 'Your card will be charged after your trial ends.'}
+                        Your card will be charged after your trial ends.
                     </p>
 
                     {/* Referral code section - inline on the page */}
