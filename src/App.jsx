@@ -237,18 +237,42 @@ function SubscriptionGuard({ session, children, openSettingsToSubscription, onSi
                                 Sign Out
                             </button>
                         </>
-                    ) : (
+                    ) : status?.status === 'none' ? (
                         <>
-                            <h1 style={{ fontSize: '3rem', marginBottom: '1rem' }}>Free Access Expired</h1>
+                            <h1 style={{ fontSize: '3rem', marginBottom: '1rem' }}>Start Your Free Trial</h1>
                             <p style={{ fontSize: '1.2rem', maxWidth: '500px', marginBottom: '2rem', opacity: 0.8 }}>
-                                Your free access has ended. Subscribe to keep your digital distractions at bay.
+                                Enter your payment details to begin your 7-day free trial. You won't be charged until the trial ends.
                             </p>
                             <button
                                 className="primary-button"
                                 style={{ fontSize: '1.2rem', padding: '1rem 2rem' }}
                                 onClick={openSettingsToSubscription}
                             >
-                                Subscribe Now
+                                Start Free Trial
+                            </button>
+                            <button
+                                onClick={onSignOut}
+                                style={{
+                                    marginTop: '1.5rem', background: 'none', border: 'none',
+                                    color: 'rgba(255,255,255,0.5)', cursor: 'pointer',
+                                    fontSize: '0.9rem', textDecoration: 'underline'
+                                }}
+                            >
+                                Sign Out
+                            </button>
+                        </>
+                    ) : (
+                        <>
+                            <h1 style={{ fontSize: '3rem', marginBottom: '1rem' }}>Subscription Expired</h1>
+                            <p style={{ fontSize: '1.2rem', maxWidth: '500px', marginBottom: '2rem', opacity: 0.8 }}>
+                                Your subscription has ended. Resubscribe to keep your digital distractions at bay.
+                            </p>
+                            <button
+                                className="primary-button"
+                                style={{ fontSize: '1.2rem', padding: '1rem 2rem' }}
+                                onClick={openSettingsToSubscription}
+                            >
+                                Resubscribe
                             </button>
                             <button
                                 onClick={onSignOut}
@@ -2722,8 +2746,8 @@ function AuthForm({ supabase }) {
                     // Supabase will resend confirmation email
                     setMessage("We've resent a confirmation email. Please check your inbox (and spam folder).");
                 } else {
-                    // Clear the onboarding flag so the tutorial shows for new users
-                    localStorage.removeItem('hasSeenOnboarding');
+                    // Suppress tour until after first checkout (card-upfront model)
+                    localStorage.setItem('hasSeenOnboarding', 'true');
                     setMessage("Account created! Please check your email to confirm your account.");
                 }
             } catch (err) {
@@ -3265,9 +3289,9 @@ export default function App() {
                     const isNewUser = (Date.now() - createdAt.getTime()) < 2 * 60 * 1000;
 
                     if (isNewUser) {
-                        console.log('[AUTH] New user detected, triggering onboarding');
-                        // Trigger onboarding tour
-                        localStorage.removeItem('hasSeenOnboarding');
+                        console.log('[AUTH] New OAuth user detected, deferring tour until after checkout');
+                        // Suppress tour until after first checkout (card-upfront model)
+                        localStorage.setItem('hasSeenOnboarding', 'true');
 
                         // Ensure trial is created for new OAuth users
                         try {
@@ -3685,6 +3709,9 @@ export default function App() {
                                 onClick={() => {
                                     setShowPaymentSuccess(false);
                                     setPaymentSuccessData(null);
+                                    // Trigger onboarding tour after first checkout
+                                    localStorage.removeItem('hasSeenOnboarding');
+                                    setTourRestartKey(prev => prev + 1);
                                 }}
                                 className="primary-button"
                                 style={{

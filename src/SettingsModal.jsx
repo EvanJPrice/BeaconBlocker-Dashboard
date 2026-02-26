@@ -551,7 +551,7 @@ function SubscriptionTab({ session }) {
             }}>
                 <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     {hasNoSubscription
-                        ? 'No Active Subscription'
+                        ? 'Free Trial Available'
                         : isTrialExpired
                             ? 'Trial Expired'
                             : isTrial
@@ -572,7 +572,7 @@ function SubscriptionTab({ session }) {
                 </h4>
                 <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
                     {hasNoSubscription
-                        ? 'Subscribe to unlock all features.'
+                        ? 'Start a 7-day free trial to unlock all features.'
                         : isTrialExpired
                             ? 'Subscribe to continue using Beacon Blocker.'
                             : isTrial
@@ -799,9 +799,11 @@ function SubscriptionTab({ session }) {
                         Choose Your Plan
                     </h4>
                     <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem', fontSize: '0.95rem' }}>
-                        {isTrialExpired || hasNoSubscription
-                            ? 'Choose a plan to get started.'
-                            : 'Your card will be charged after your trial ends.'}
+                        {hasNoSubscription
+                            ? "Choose a plan to start your 7-day free trial. You won't be charged until the trial ends."
+                            : isTrialExpired
+                                ? 'Choose a plan to resubscribe.'
+                                : 'Your card will be charged after your trial ends.'}
                     </p>
 
                     {/* Referral code section - inline on the page */}
@@ -889,7 +891,7 @@ function SubscriptionTab({ session }) {
                                 disabled={!priceIds.monthly}
                                 onClick={() => handleCheckout(priceIds.monthly)}
                             >
-                                {isTrial ? 'Select Monthly' : 'Get Started'}
+                                {hasNoSubscription ? 'Start Free Trial' : isTrial ? 'Select Monthly' : 'Get Started'}
                             </button>
                         </div>
                         <div style={{
@@ -911,7 +913,7 @@ function SubscriptionTab({ session }) {
                                 disabled={!priceIds.yearly}
                                 onClick={() => handleCheckout(priceIds.yearly)}
                             >
-                                {isTrial ? 'Select Yearly' : 'Get Started'}
+                                {hasNoSubscription ? 'Start Free Trial' : isTrial ? 'Select Yearly' : 'Get Started'}
                             </button>
                         </div>
                     </div>
