@@ -810,15 +810,16 @@ function SubscriptionTab({ session }) {
                     {!referralApplied && (
                         <div style={{
                             padding: '1rem 1.25rem',
-                            background: 'var(--input-bg)',
-                            border: '1px solid var(--border-color)',
+                            background: 'rgba(37, 99, 235, 0.05)',
+                            border: '1px solid rgba(37, 99, 235, 0.2)',
+                            borderLeft: '3px solid #2563eb',
                             borderRadius: '10px',
                             marginBottom: '1.5rem'
                         }}>
+                            <p style={{ margin: '0 0 0.75rem', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                                Have a referral code? You'll both get 2 weeks free!
+                            </p>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                                <span style={{ fontSize: '0.95rem', color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
-                                    Referral code?
-                                </span>
                                 <input
                                     type="text"
                                     placeholder="BEACON-XXXXXX"

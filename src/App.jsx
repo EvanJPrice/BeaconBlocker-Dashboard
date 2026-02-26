@@ -16,7 +16,6 @@ import ProfileDropdown from './ProfileDropdown';
 import PresetsModal from './PresetsModal';
 import SettingsModal from './SettingsModal';
 import ReferralBanner from './ReferralBanner';
-import { getReferralStats } from './api/referral';
 // CSS is imported in main.jsx
 
 // --- Helper: Get base domain ---
@@ -3064,11 +3063,8 @@ export default function App() {
     // --- Onboarding Restart State ---
     const [tourRestartKey, setTourRestartKey] = useState(0);
 
-    // --- Referral Prompt State (for new OAuth users) ---
-    const [showReferralPrompt, setShowReferralPrompt] = useState(false);
-    const [referralPromptCode, setReferralPromptCode] = useState('');
-    const [referralPromptLoading, setReferralPromptLoading] = useState(false);
-    const [referralPromptMessage, setReferralPromptMessage] = useState('');
+    // --- Subscription Guard Refresh (force re-check after payment) ---
+    const [guardRefreshKey, setGuardRefreshKey] = useState(0);
 
     // --- Payment Success Modal State ---
     const [showPaymentSuccess, setShowPaymentSuccess] = useState(false);
@@ -3326,14 +3322,6 @@ export default function App() {
                                 console.error('[AUTH] Failed to apply referral code:', e);
                             }
                             localStorage.removeItem('pendingReferralCode');
-                        } else {
-                            // No pending code - show referral prompt for new OAuth users
-                            // Only show if onboarding is already complete, otherwise wait for it
-                            const hasSeenOnboarding = localStorage.getItem('hasSeenOnboarding');
-                            if (hasSeenOnboarding) {
-                                setTimeout(() => setShowReferralPrompt(true), 1000);
-                            }
-                            // If onboarding not complete, the referral prompt will show after onboarding finishes
                         }
                     }
                 }
@@ -3405,6 +3393,7 @@ export default function App() {
             ) : (
                 <div>
                     <SubscriptionGuard
+                        key={guardRefreshKey}
                         session={session}
                         openSettingsToSubscription={() => setShowSubscriptionModal(true)}
                         onSignOut={async () => {
@@ -3431,23 +3420,7 @@ export default function App() {
                         onOpenHistory={() => setIsHistoryModalOpen(true)}
                         onCloseHistory={() => setIsHistoryModalOpen(false)}
                         isHistoryModalOpen={isHistoryModalOpen}
-                        onClose={async () => {
-                            // After onboarding completes, check if user needs referral prompt
-                            // Only for new users who haven't entered a referral code yet
-                            const pendingCode = localStorage.getItem('pendingReferralCode');
-                            if (!pendingCode) {
-                                // Also check if user was already referred (e.g., during signup)
-                                try {
-                                    const stats = await getReferralStats(session);
-                                    if (!stats.was_referred) {
-                                        setTimeout(() => setShowReferralPrompt(true), 500);
-                                    }
-                                } catch (e) {
-                                    // If check fails, show modal anyway
-                                    setTimeout(() => setShowReferralPrompt(true), 500);
-                                }
-                            }
-                        }}
+                        onClose={() => {}}
                     />
                 </div>
             )}
@@ -3473,118 +3446,6 @@ export default function App() {
                 userId={session?.user?.id}
                 userEmail={session?.user?.email}
             />
-
-            {/* Referral Code Prompt Modal - shown to new OAuth users */}
-            {showReferralPrompt && (
-                <div style={{
-                    position: 'fixed',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    background: 'rgba(0,0,0,0.5)',
-                    display: 'flex',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    zIndex: 10000
-                }}>
-                    <div style={{
-                        background: 'var(--card-bg, white)',
-                        padding: '2rem',
-                        borderRadius: '16px',
-                        maxWidth: '400px',
-                        width: '90%',
-                        boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
-                    }}>
-                        <h2 style={{ margin: '0 0 0.5rem 0', color: 'var(--text-primary)' }}>One more thing!</h2>
-                        <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
-                            Got a referral code? Enter it and you'll both get 2 weeks free!
-                        </p>
-
-                        <input
-                            type="text"
-                            placeholder="e.g. BEACON-A1B2C3"
-                            value={referralPromptCode}
-                            onChange={(e) => {
-                                let value = e.target.value.toUpperCase();
-                                // If user pastes full URL, extract just the code
-                                if (value.includes('REF=')) {
-                                    const match = value.match(/REF=(BEACON-[A-Z0-9]+)/i);
-                                    if (match) value = match[1].toUpperCase();
-                                }
-                                setReferralPromptCode(value);
-                            }}
-                            style={{
-                                width: '100%',
-                                padding: '0.75rem',
-                                fontSize: '1rem',
-                                borderRadius: '8px',
-                                border: '1px solid var(--border-color)',
-                                marginBottom: '0.5rem',
-                                textTransform: 'uppercase',
-                                background: 'var(--input-bg)',
-                                color: 'var(--text-primary)'
-                            }}
-                        />
-
-                        {referralPromptMessage && (
-                            <p style={{
-                                color: referralPromptMessage.includes('success') ? '#16a34a' : '#dc2626',
-                                fontSize: '0.9rem',
-                                marginBottom: '0.5rem'
-                            }}>
-                                {referralPromptMessage}
-                            </p>
-                        )}
-
-                        <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem' }}>
-                            <button
-                                onClick={async () => {
-                                    if (!referralPromptCode.trim()) {
-                                        setShowReferralPrompt(false);
-                                        return;
-                                    }
-                                    setReferralPromptLoading(true);
-                                    try {
-                                        const res = await fetch(`${config.BACKEND_URL}/api/referral/apply`, {
-                                            method: 'POST',
-                                            headers: {
-                                                'Content-Type': 'application/json',
-                                                'Authorization': `Bearer ${session?.access_token}`
-                                            },
-                                            body: JSON.stringify({ code: referralPromptCode.trim() })
-                                        });
-                                        const data = await res.json();
-                                        if (res.ok) {
-                                            setReferralPromptMessage('Referral code applied successfully!');
-                                            setTimeout(() => setShowReferralPrompt(false), 1500);
-                                        } else {
-                                            setReferralPromptMessage(data.error || 'Invalid code');
-                                        }
-                                    } catch (e) {
-                                        setReferralPromptMessage('Failed to apply code');
-                                    }
-                                    setReferralPromptLoading(false);
-                                }}
-                                disabled={referralPromptLoading}
-                                className="primary-button"
-                                style={{
-                                    flex: 1,
-                                    opacity: referralPromptLoading ? 0.6 : 1
-                                }}
-                            >
-                                {referralPromptLoading ? 'Applying...' : 'Apply Code'}
-                            </button>
-                            <button
-                                onClick={() => setShowReferralPrompt(false)}
-                                className="neutral-button"
-                            >
-                                Skip
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {/* Payment Success Modal - shown after Stripe checkout */}
             {showPaymentSuccess && (() => {
@@ -3712,6 +3573,8 @@ export default function App() {
                                     // Trigger onboarding tour after first checkout
                                     localStorage.removeItem('hasSeenOnboarding');
                                     setTourRestartKey(prev => prev + 1);
+                                    // Force SubscriptionGuard to re-check (webhook should have processed by now)
+                                    setGuardRefreshKey(prev => prev + 1);
                                 }}
                                 className="primary-button"
                                 style={{
